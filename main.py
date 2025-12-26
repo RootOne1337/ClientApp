@@ -1,9 +1,10 @@
 import asyncio
 import sys
+import time
 from config import settings
 from core import VirtBot
 from utils import setup_logger
-from utils.ip_check import check_ip_access
+from utils.ip_check import check_ip_access, IPStatus
 
 
 async def main():
@@ -17,19 +18,33 @@ async def main():
     
     # Проверка IP доступа
     logger.info("🔍 Checking IP access...")
-    allowed, ip = check_ip_access()
+    status, ip = check_ip_access()
+    
+    if status == IPStatus.NO_INTERNET:
+        logger.warning("❌ NO INTERNET - Cannot get external IP")
+        logger.info("🔄 TODO: Implement connection restore...")
+        # TODO: Заглушка - попытка восстановить интернет
+        logger.info("   Waiting 30 seconds before retry...")
+        time.sleep(30)
+        # Пока просто выходим, потом можно добавить retry логику
+        sys.exit(1)
+    
     logger.info(f"   Your IP: {ip}")
     
-    if not allowed:
-        logger.error("❌ ACCESS DENIED - IP not in whitelist")
-        logger.error("   Bot will not start on this IP")
-        logger.info("=" * 50)
-        sys.exit(0)
+    if status == IPStatus.BLOCKED:
+        logger.info("🛑 IP is in blocked list (home/office PC)")
+        logger.info("   Farm loop will NOT start")
+        logger.info("   Running in monitoring mode only...")
+        # На домашних/офисных ПК — только heartbeat, без фарма
+    else:
+        logger.info("✅ IP allowed - Farm loop will start")
     
-    logger.info("✅ IP access granted")
     logger.info("=" * 50)
     
+    # Создаём бота с информацией о статусе IP
     bot = VirtBot()
+    bot.ip_status = status  # Сохраняем статус для использования в bot.run()
+    bot.external_ip = ip
     
     try:
         await bot.run()

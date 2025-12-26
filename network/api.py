@@ -18,7 +18,8 @@ class APIClient:
         self,
         status: str = "online",
         current_server: Optional[str] = None,
-        current_char: Optional[str] = None
+        current_char: Optional[str] = None,
+        ip_status: Optional[str] = None  # allowed, blocked, no_internet
     ) -> Dict[str, Any]:
         """Отправить heartbeat на сервер"""
         try:
@@ -31,6 +32,7 @@ class APIClient:
                     "current_server": current_server,
                     "current_char": current_char,
                     "version": settings.VERSION,
+                    "ip_status": ip_status,
                 }
             )
             response.raise_for_status()

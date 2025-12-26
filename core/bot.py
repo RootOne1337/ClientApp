@@ -61,10 +61,15 @@ class VirtBot:
         """Отправка heartbeat каждые N секунд"""
         while self.running:
             try:
+                # Получаем ip_status если он установлен в main.py
+                ip_status = getattr(self, 'ip_status', None)
+                ip_status_str = ip_status.value if ip_status else None
+                
                 response = await self.api.heartbeat(
                     status=self.status,
                     current_server=self.current_server,
-                    current_char=self.current_char
+                    current_char=self.current_char,
+                    ip_status=ip_status_str
                 )
                 
                 # Обработка команд из ответа
