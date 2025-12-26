@@ -27,31 +27,34 @@ CRASH_CONTEXT_LINES = 20
 class LogMonitor:
     """Монитор логов с отправкой на сервер"""
     
-    def __init__(self):
+    def __init__(self, send_existing: bool = True):
         self.api_url = settings.API_URL
-        self.pc_name = os.environ.get("COMPUTERNAME", "unknown")
+        self.pc_name = os.environ.get("COMPUTERNAME", os.environ.get("HOSTNAME", "unknown"))
         self.last_position = 0
         self.last_lines = []  # Последние N строк для контекста
         self.current_log_file = None
+        self.send_existing = send_existing
+        self.sent_count = 0
         
         print(f"🔍 Log Monitor started")
         print(f"   API: {self.api_url}")
         print(f"   PC: {self.pc_name}")
         print(f"   Logs: {LOGS_DIR}")
+        print(f"   Send existing logs: {send_existing}")
         print("-" * 50)
     
     def get_today_log_file(self) -> Path:
         """Получить путь к сегодняшнему логу"""
         return LOGS_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.log"
     
-    def tail_file(self, filepath: Path) -> list:
-        """Прочитать новые строки из файла"""
+    def read_file_lines(self, filepath: Path, from_position: int = 0) -> list:
+        """Прочитать строки из файла начиная с позиции"""
         if not filepath.exists():
             return []
         
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                f.seek(self.last_position)
+                f.seek(from_position)
                 new_lines = f.readlines()
                 self.last_position = f.tell()
                 return new_lines
@@ -97,7 +100,7 @@ class LogMonitor:
         """Отправить лог на сервер"""
         try:
             response = httpx.post(
-                f"{self.api_url}/logs",
+                f"{self.api_url}/logs/",  # Добавил слэш в конце!
                 json={
                     "machine_name": self.pc_name,
                     "level": level.lower(),
@@ -107,7 +110,12 @@ class LogMonitor:
                 timeout=10
             )
             if response.status_code == 200:
-                print(f"📤 Sent: [{level}] {message[:50]}...")
+                self.sent_count += 1
+                # Показываем каждое 10-е сообщение чтобы не спамить
+                if self.sent_count <= 5 or self.sent_count % 10 == 0:
+                    print(f"📤 Sent #{self.sent_count}: [{level}] {message[:50]}...")
+            else:
+                print(f"❌ Server returned {response.status_code}: {response.text[:100]}")
         except Exception as e:
             print(f"❌ Failed to send: {e}")
     
@@ -132,6 +140,37 @@ class LogMonitor:
         print(context)
         print(f"{'='*50}\n")
     
+    def process_line(self, line: str):
+        """Обработать одну строку лога"""
+        line = line.strip()
+        if not line:
+            return
+        
+        # Добавляем в буфер контекста
+        self.last_lines.append(line)
+        if len(self.last_lines) > CRASH_CONTEXT_LINES * 2:
+            self.last_lines = self.last_lines[-CRASH_CONTEXT_LINES:]
+        
+        # Парсим
+        parsed = self.parse_log_line(line)
+        if not parsed:
+            return
+        
+        level = parsed["level"]
+        
+        # Выводим ошибки в консоль
+        if level in ["ERROR", "CRITICAL"]:
+            print(f"🔴 {line}")
+        elif level in ["WARN", "WARNING"]:
+            print(f"🟡 {line}")
+        
+        # Проверяем краш
+        if self.is_crash_indicator(line):
+            self.send_crash_report(line)
+        # Отправляем все логи
+        elif level in SEND_LEVELS:
+            self.send_to_server(level, parsed["message"])
+    
     def monitor(self, interval: float = 1.0):
         """Главный цикл мониторинга"""
         print(f"\n👀 Monitoring logs (interval: {interval}s)...")
@@ -141,49 +180,35 @@ class LogMonitor:
             while True:
                 log_file = self.get_today_log_file()
                 
-                # Проверяем смену дня
+                # Проверяем смену дня или первый запуск
                 if log_file != self.current_log_file:
                     self.current_log_file = log_file
-                    self.last_position = 0
-                    print(f"📁 Watching: {log_file}")
+                    
+                    if self.send_existing:
+                        # Читаем ВСЕ существующие логи
+                        self.last_position = 0
+                        print(f"📁 Reading existing logs from: {log_file}")
+                    else:
+                        # Начинаем с конца файла
+                        if log_file.exists():
+                            self.last_position = log_file.stat().st_size
+                        else:
+                            self.last_position = 0
+                        print(f"📁 Watching (new only): {log_file}")
                 
                 # Читаем новые строки
-                new_lines = self.tail_file(log_file)
+                new_lines = self.read_file_lines(log_file, self.last_position)
+                
+                if new_lines:
+                    print(f"📝 Processing {len(new_lines)} lines...")
                 
                 for line in new_lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    
-                    # Добавляем в буфер контекста
-                    self.last_lines.append(line)
-                    if len(self.last_lines) > CRASH_CONTEXT_LINES * 2:
-                        self.last_lines = self.last_lines[-CRASH_CONTEXT_LINES:]
-                    
-                    # Парсим
-                    parsed = self.parse_log_line(line)
-                    if not parsed:
-                        continue
-                    
-                    # Выводим в консоль
-                    level = parsed["level"]
-                    if level in ["ERROR", "CRITICAL"]:
-                        print(f"🔴 {line}")
-                    elif level == "WARN":
-                        print(f"🟡 {line}")
-                    
-                    # Проверяем краш
-                    if self.is_crash_indicator(line):
-                        self.send_crash_report(line)
-                    
-                    # Отправляем важные логи
-                    elif level in SEND_LEVELS:
-                        self.send_to_server(level, parsed["message"])
+                    self.process_line(line)
                 
                 time.sleep(interval)
                 
         except KeyboardInterrupt:
-            print("\n\n👋 Monitor stopped")
+            print(f"\n\n👋 Monitor stopped. Sent {self.sent_count} logs to server.")
 
 
 def main():
@@ -193,7 +218,19 @@ def main():
         print("   Make sure you're running from the client directory")
         sys.exit(1)
     
-    monitor = LogMonitor()
+    # Аргументы командной строки
+    send_existing = "--new-only" not in sys.argv
+    
+    print("=" * 50)
+    print("  VirtBot Log Monitor")
+    print("=" * 50)
+    print()
+    print("Usage:")
+    print("  python log_monitor.py           # Send all existing + new logs")
+    print("  python log_monitor.py --new-only # Only new logs")
+    print()
+    
+    monitor = LogMonitor(send_existing=send_existing)
     monitor.monitor(interval=1.0)
 
 
