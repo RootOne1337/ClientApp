@@ -7,6 +7,10 @@ Sources priority:
 1. HTTP Time APIs (multiple)
 2. HTTPS headers from major websites
 3. Fallback to any available source
+
+Returns:
+    True if time was successfully synced
+    False if all attempts failed
 """
 
 import ctypes
@@ -21,6 +25,15 @@ from typing import Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from email.utils import parsedate_to_datetime
+
+# Добавляем parent в path для импорта
+sys.path.insert(0, str(__file__).rsplit('scripts', 1)[0])
+try:
+    from utils import get_logger
+    logger = get_logger()
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 # Moscow timezone offset (UTC+3)
 MOSCOW_OFFSET = timedelta(hours=3)
@@ -90,22 +103,6 @@ def get_time_timeapi_io() -> Optional[datetime]:
         return None
 
 
-def get_time_worldclockapi() -> Optional[datetime]:
-    """WorldClockAPI - Another alternative"""
-    try:
-        url = "http://worldclockapi.com/api/json/utc/now"
-        req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            data = json.loads(response.read().decode())
-            dt_str = data.get("currentDateTime", "")
-            # Parse UTC and convert to Moscow
-            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-            moscow_dt = dt.replace(tzinfo=None) + MOSCOW_OFFSET
-            return moscow_dt
-    except:
-        return None
-
-
 def get_time_from_http_headers(url: str) -> Optional[datetime]:
     """Extract time from HTTP Date header (works with any website)"""
     try:
@@ -123,64 +120,16 @@ def get_time_from_http_headers(url: str) -> Optional[datetime]:
 
 
 def get_time_google() -> Optional[datetime]:
-    """Get time from Google's HTTP header"""
     return get_time_from_http_headers("https://www.google.com")
 
-
-def get_time_cloudflare() -> Optional[datetime]:
-    """Get time from Cloudflare's HTTP header"""
-    return get_time_from_http_headers("https://www.cloudflare.com")
-
-
-def get_time_microsoft() -> Optional[datetime]:
-    """Get time from Microsoft's HTTP header"""
-    return get_time_from_http_headers("https://www.microsoft.com")
-
-
-def get_time_amazon() -> Optional[datetime]:
-    """Get time from Amazon's HTTP header"""
-    return get_time_from_http_headers("https://www.amazon.com")
-
-
 def get_time_yandex() -> Optional[datetime]:
-    """Get time from Yandex's HTTP header (Russian server, good for Moscow)"""
     return get_time_from_http_headers("https://www.yandex.ru")
 
-
-def get_time_mail_ru() -> Optional[datetime]:
-    """Get time from Mail.ru's HTTP header"""
-    return get_time_from_http_headers("https://www.mail.ru")
-
-
-def get_time_vk() -> Optional[datetime]:
-    """Get time from VK's HTTP header"""
-    return get_time_from_http_headers("https://www.vk.com")
-
+def get_time_cloudflare() -> Optional[datetime]:
+    return get_time_from_http_headers("https://www.cloudflare.com")
 
 def get_time_github() -> Optional[datetime]:
-    """Get time from GitHub's HTTP header"""
     return get_time_from_http_headers("https://github.com")
-
-
-def get_time_apple() -> Optional[datetime]:
-    """Get time from Apple's HTTP header"""
-    return get_time_from_http_headers("https://www.apple.com")
-
-
-def get_time_httpbin() -> Optional[datetime]:
-    """HTTPBin - Returns current time in response"""
-    try:
-        url = "http://httpbin.org/headers"
-        req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            date_header = response.headers.get('Date')
-            if date_header:
-                dt = parsedate_to_datetime(date_header)
-                moscow_dt = dt.astimezone(timezone(MOSCOW_OFFSET)).replace(tzinfo=None)
-                return moscow_dt
-    except:
-        pass
-    return None
 
 
 # All time sources in priority order
@@ -188,16 +137,9 @@ TIME_SOURCES = [
     ("WorldTimeAPI", get_time_worldtimeapi),
     ("TimeAPI.io", get_time_timeapi_io),
     ("Yandex", get_time_yandex),
-    ("Mail.ru", get_time_mail_ru),
-    ("VK", get_time_vk),
     ("Google", get_time_google),
     ("Cloudflare", get_time_cloudflare),
-    ("Microsoft", get_time_microsoft),
     ("GitHub", get_time_github),
-    ("Amazon", get_time_amazon),
-    ("Apple", get_time_apple),
-    ("WorldClockAPI", get_time_worldclockapi),
-    ("HTTPBin", get_time_httpbin),
 ]
 
 
@@ -221,11 +163,11 @@ def set_system_time(dt: datetime) -> bool:
         result = ctypes.windll.kernel32.SetLocalTime(ctypes.byref(st))
         if not result:
             error = ctypes.get_last_error()
-            print(f"[ERROR] SetLocalTime failed with error code: {error}", flush=True)
+            logger.error(f"SetLocalTime failed with error code: {error}")
             return False
         return True
     except Exception as e:
-        print(f"[ERROR] Failed to set system time: {e}", flush=True)
+        logger.error(f"Failed to set system time: {e}")
         return False
 
 
@@ -233,63 +175,70 @@ def get_current_time_from_any_source() -> Optional[Tuple[str, datetime]]:
     """Try all sources and return first successful result"""
     for name, func in TIME_SOURCES:
         try:
-            print(f"[INFO] Trying {name}...", flush=True)
+            logger.info(f"Trying {name}...")
             dt = func()
             if dt:
-                print(f"[OK] Got time from {name}: {dt.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+                logger.info(f"Got time from {name}: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
                 return (name, dt)
             else:
-                print(f"[FAIL] {name} returned no data", flush=True)
+                logger.debug(f"{name} returned no data")
         except Exception as e:
-            print(f"[FAIL] {name}: {e}", flush=True)
+            logger.debug(f"{name}: {e}")
         time.sleep(0.5)  # Small delay between sources
     return None
 
 
-def main():
-    """Main function - keeps trying until time is synchronized"""
-    print("=" * 60, flush=True)
-    print("TIME SYNCHRONIZATION - Ultra Fault-Tolerant", flush=True)
-    print("=" * 60, flush=True)
-    print(f"Available sources: {len(TIME_SOURCES)}", flush=True)
-    print("", flush=True)
+def sync_time() -> bool:
+    """
+    Синхронизировать системное время.
+    
+    Returns:
+        True если время успешно синхронизировано
+        False если все попытки провалились
+    """
+    logger.info("=" * 50)
+    logger.info("🕐 Time Synchronization")
+    logger.info("=" * 50)
 
     for cycle in range(1, MAX_GLOBAL_RETRIES + 1):
-        print(f"[CYCLE {cycle}/{MAX_GLOBAL_RETRIES}] Attempting time sync...", flush=True)
+        logger.info(f"Attempt {cycle}/{MAX_GLOBAL_RETRIES}...")
         
         result = get_current_time_from_any_source()
         
         if result:
             source_name, dt = result
-            print("", flush=True)
-            print(f"[SUCCESS] Time obtained from: {source_name}", flush=True)
-            print(f"[INFO] Setting system time to: {dt.strftime('%d.%m.%Y %H:%M:%S')} (Moscow)", flush=True)
+            logger.info(f"✅ Time from: {source_name}")
+            logger.info(f"   Setting to: {dt.strftime('%d.%m.%Y %H:%M:%S')} (Moscow)")
             
             if set_system_time(dt):
-                print("[OK] System time successfully updated!", flush=True)
-                print("=" * 60, flush=True)
-                return 0
+                logger.info("✅ System time updated!")
+                return True
             else:
-                print("[ERROR] Failed to set system time (need admin rights?)", flush=True)
+                logger.error("❌ Failed to set time (need admin rights?)")
         else:
-            print(f"[WARN] All sources failed in cycle {cycle}", flush=True)
+            logger.warning(f"All sources failed in attempt {cycle}")
         
         if cycle < MAX_GLOBAL_RETRIES:
-            print(f"[INFO] Waiting {CYCLE_DELAY}s before next cycle...", flush=True)
-            print("", flush=True)
+            logger.info(f"Waiting {CYCLE_DELAY}s before retry...")
             time.sleep(CYCLE_DELAY)
     
-    print("[CRITICAL] Failed to sync time after all attempts!", flush=True)
-    print("=" * 60, flush=True)
-    return 1
+    logger.error("❌ Failed to sync time after all attempts!")
+    return False
+
+
+# Для обратной совместимости
+def main() -> int:
+    """Legacy main function"""
+    return 0 if sync_time() else 1
 
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        success = sync_time()
+        sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupted by user", flush=True)
+        print("\n[INFO] Interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"[CRITICAL] Unexpected error: {e}", flush=True)
+        print(f"[CRITICAL] Unexpected error: {e}")
         sys.exit(1)

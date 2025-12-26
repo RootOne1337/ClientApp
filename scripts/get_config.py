@@ -1,84 +1,65 @@
-#!/usr/bin/env python3
 """
-Standalone клиент для получения конфигурации с GTA5RP API
-Интегрирован в GTA5rpVirt
+Account Config Fetcher
 
-Процесс:
-1. Получает внешний IP адрес
-2. Отправляет IP на API сервер
-3. Получает конфигурацию аккаунта
-4. Сохраняет в config.txt и credentials.json в корневую папку бота
+Gets account configuration from GTA5RP API based on external IP.
+Saves to data/account.json and data/credentials.json
+
+Returns:
+    True if config was successfully fetched and saved
+    False if failed
 """
+
 import os
 import json
 import sys
-import subprocess
 from pathlib import Path
 
-# Ensure stdout/stderr always allow Unicode output on legacy consoles
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+# Добавляем parent в path для импорта
+sys.path.insert(0, str(Path(__file__).parent.parent))
+try:
+    from config import settings, ACCOUNT_FILE, CREDENTIALS_FILE, DATA_DIR
+    from utils import get_logger
+    logger = get_logger()
+except ImportError:
+    print("Error: Run from client directory")
+    sys.exit(1)
 
 try:
     import requests
     import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 except ImportError:
-    print("Библиотека requests не найдена. Устанавливаю...", flush=True)
+    import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "urllib3"])
     import requests
     import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ============================================================================
-# ⚙️  КОНФИГУРАЦИЯ
-# ============================================================================
-API_URL = "http://gta5rp-api.leetpc.com"
-API_SECRET = "gta5rp_api_secret_2025"
-# ============================================================================
 
-# Файлы будут сохранены в родительской папке (корень бота / Release)
-SCRIPT_DIR = Path(__file__).parent
-BOT_ROOT = SCRIPT_DIR.parent
-CONFIG_FILE = BOT_ROOT / "config.txt"
-CREDENTIALS_FILE = BOT_ROOT / "credentials.json"
-UPDATE_GTA_SETTINGS_SCRIPT = SCRIPT_DIR / "update_gta_settings.py"
-
-def get_external_ip():
-    """Получает внешний IP адрес из интернета"""
+def get_external_ip() -> str:
+    """Получить внешний IP адрес"""
     try:
-        print("📍 Получаем внешний IP адрес...")
         response = requests.get("https://api.ipify.org?format=json", timeout=5)
         response.raise_for_status()
-        ip = response.json().get("ip")
-        print(f"✓ Внешний IP получен: {ip}")
-        return ip
-    except Exception as e:
-        print(f"✗ Ошибка при получении IP: {e}")
+        return response.json().get("ip", "")
+    except:
         try:
-            print("  Пробуем альтернативный способ...")
             response = requests.get("https://ifconfig.me", timeout=5)
-            ip = response.text.strip()
-            print(f"✓ IP получен (альтернативный метод): {ip}")
-            return ip
-        except Exception as e2:
-            print(f"✗ Оба метода не сработали: {e2}")
-            return None
+            return response.text.strip()
+        except:
+            return ""
 
-def get_config_from_api(ip: str, secret: str) -> dict or None:
-    """Получает конфигурацию с API сервера"""
+
+def get_config_from_api(ip: str) -> dict:
+    """Получить конфигурацию с API сервера"""
     try:
-        print(f"\n🔐 Получаем токен для IP {ip}...")
-        
-        token_url = f"{API_URL}/api/v1/auth/token"
+        # Получаем токен
+        token_url = f"{settings.CONFIG_API_URL}/api/v1/auth/token"
         token_data = {
             "ip": ip,
-            "secret": secret
+            "secret": settings.CONFIG_API_SECRET
         }
-        
-        headers = {
-            "X-Forwarded-For": ip
-        }
+        headers = {"X-Forwarded-For": ip}
         
         token_response = requests.post(
             token_url,
@@ -89,16 +70,14 @@ def get_config_from_api(ip: str, secret: str) -> dict or None:
         )
         
         if token_response.status_code != 200:
-            print(f"✗ Ошибка получения токена: {token_response.status_code}")
-            print(f"  Ответ: {token_response.text}")
-            return None
+            logger.error(f"Token error: {token_response.status_code}")
+            return {}
         
-        token_data = token_response.json()
-        access_token = token_data.get("access_token")
-        print(f"✓ Токен получен успешно")
+        access_token = token_response.json().get("access_token")
+        logger.info("✅ Token obtained")
         
-        print(f"\n📦 Получаем конфигурацию...")
-        config_url = f"{API_URL}/api/v1/config"
+        # Получаем конфиг
+        config_url = f"{settings.CONFIG_API_URL}/api/v1/config"
         headers = {
             "Authorization": f"Bearer {access_token}",
             "X-Forwarded-For": ip
@@ -112,122 +91,111 @@ def get_config_from_api(ip: str, secret: str) -> dict or None:
         )
         
         if config_response.status_code != 200:
-            print(f"✗ Ошибка получения конфигурации: {config_response.status_code}")
-            return None
+            logger.error(f"Config error: {config_response.status_code}")
+            return {}
         
         return config_response.json()
         
     except Exception as e:
-        print(f"✗ Ошибка при запросе к API: {e}")
-        return None
+        logger.error(f"API request failed: {e}")
+        return {}
 
-def save_config_to_file(config: dict, filepath: Path):
-    """Сохраняет конфигурацию в текстовый файл в формате key=value;"""
+
+def save_account_config(config: dict) -> bool:
+    """Сохранить конфигурацию аккаунта в JSON"""
     try:
-        print(f"\n💾 Сохраняем конфигурацию в {filepath}...")
-        
-        config_lines = []
-        mapping = {
-            "active_character": "Active Character",
-            "email": "Email",
-            "password": "Password",
-            "imap": "IMAP",
-            "social_login": "SocialLogin",
-            "social_password": "SocialPassword",
-            "pcname": "PCNAME",
-            "login": "Login",
-            "epic_login": "EpicLogin",
-            "epic_password": "EpicPassword",
+        # Извлекаем нужные поля
+        account_data = {
+            "active_character": config.get("active_character", ""),
+            "email": config.get("email", ""),
+            "password": config.get("password", ""),
+            "imap": config.get("imap", ""),
+            "social_login": config.get("social_login", ""),
+            "social_password": config.get("social_password", ""),
+            "pcname": config.get("pcname", ""),
+            "login": config.get("login", ""),
+            "epic_login": config.get("epic_login", ""),
+            "epic_password": config.get("epic_password", ""),
         }
         
-        for key, label in mapping.items():
-            value = config.get(key, "")
-            if value is None:
-                value = ""
-            config_lines.append(f"{label}={value};")
+        # Сохраняем
+        DATA_DIR.mkdir(exist_ok=True)
+        with open(ACCOUNT_FILE, "w", encoding="utf-8") as f:
+            json.dump(account_data, f, indent=2, ensure_ascii=False)
         
-        config_text = "\n".join(config_lines)
-        
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(config_text)
-        
-        print(f"✓ Конфигурация сохранена")
+        logger.info(f"✅ Account config saved to {ACCOUNT_FILE}")
         return True
     except Exception as e:
-        print(f"✗ Ошибка при сохранении конфигурации: {e}")
+        logger.error(f"Failed to save account config: {e}")
         return False
 
-def save_credentials_to_file(config: dict, filepath: Path):
-    """Сохраняет Google Sheets credentials в JSON файл"""
+
+def save_credentials(config: dict) -> bool:
+    """Сохранить Google credentials в JSON"""
     try:
         google_credentials = config.get("google_credentials")
         if not google_credentials:
-            print(f"\n⚠️  Google credentials не получены от API (пропускаем)")
+            logger.info("No Google credentials in config (skipping)")
             return True
         
-        print(f"\n💾 Сохраняем Google credentials в {filepath}...")
-        with open(filepath, "w", encoding="utf-8") as f:
+        DATA_DIR.mkdir(exist_ok=True)
+        with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
             json.dump(google_credentials, f, indent=2, ensure_ascii=False)
         
-        print(f"✓ Google credentials сохранены")
+        logger.info(f"✅ Google credentials saved to {CREDENTIALS_FILE}")
         return True
     except Exception as e:
-        print(f"✗ Ошибка при сохранении credentials: {e}")
+        logger.error(f"Failed to save credentials: {e}")
         return False
 
-def main():
-    print("=" * 70)
-    print("🚀 GTA5RP Config Client (Integrated)")
-    print("=" * 70)
+
+def load_account_config() -> dict:
+    """Загрузить сохранённый конфиг аккаунта"""
+    try:
+        if ACCOUNT_FILE.exists():
+            with open(ACCOUNT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load account config: {e}")
+    return {}
+
+
+def fetch_config() -> bool:
+    """
+    Получить и сохранить конфигурацию аккаунта.
     
+    Returns:
+        True если успешно
+        False если ошибка
+    """
+    logger.info("=" * 50)
+    logger.info("📦 Fetching Account Config")
+    logger.info("=" * 50)
+    
+    # Получаем IP
     external_ip = get_external_ip()
     if not external_ip:
+        logger.error("❌ Failed to get external IP")
         return False
     
-    config = get_config_from_api(external_ip, API_SECRET)
+    logger.info(f"IP: {external_ip}")
+    
+    # Получаем конфиг
+    config = get_config_from_api(external_ip)
     if not config:
+        logger.error("❌ Failed to get config from API")
         return False
     
-    if not save_config_to_file(config, CONFIG_FILE):
+    # Сохраняем
+    if not save_account_config(config):
         return False
     
-    save_credentials_to_file(config, CREDENTIALS_FILE)
-
-    # Optional post-sync step: update GTA V settings.xml (GPU name etc).
-    try:
-        if UPDATE_GTA_SETTINGS_SCRIPT.exists():
-            print("\n🛠️  Running update_gta_settings.py...", flush=True)
-            completed = subprocess.run(
-                [sys.executable, str(UPDATE_GTA_SETTINGS_SCRIPT), "--no-kill"],
-                cwd=str(BOT_ROOT),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if completed.stdout:
-                print(completed.stdout.strip(), flush=True)
-            if completed.returncode != 0:
-                err = (completed.stderr or "").strip()
-                if err:
-                    print(err, flush=True)
-                print("⚠️  update_gta_settings.py failed (continuing).", flush=True)
-        else:
-            print("\nℹ️  update_gta_settings.py not found (skipping).", flush=True)
-    except Exception as e:
-        print(f"\n⚠️  update_gta_settings step failed (continuing): {e}", flush=True)
+    save_credentials(config)  # Опционально
     
-    print("\n" + "=" * 70)
-    print("✅ УСПЕХ! Конфигурация обновлена.")
-    print("=" * 70)
+    logger.info("✅ Config fetched successfully!")
     return True
 
+
 if __name__ == "__main__":
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    
-    try:
-        success = main()
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        print(f"\n✗ Ошибка: {e}")
-        sys.exit(1)
+    success = fetch_config()
+    sys.exit(0 if success else 1)
