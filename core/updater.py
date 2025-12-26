@@ -175,26 +175,12 @@ del "%~f0"
     def _update_git(self):
         """Обновить код через git и перезапустить"""
         try:
-            self.logger.info("📥 Pulling updates...")
+            self.logger.info("📥 Starting update via batch file...")
             
-            result = subprocess.run(
-                ["git", "pull", "--rebase"],
-                cwd=self.app_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            self.logger.info(f"Git: {result.stdout.strip()}")
-            
-            self.logger.info("📦 Installing dependencies...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"],
-                cwd=self.app_dir,
-                timeout=120
-            )
-            
-            self.logger.info("🔄 Restarting...")
-            os.execv(sys.executable, [sys.executable, "main.py"])
+            # Запускаем батник обновления и закрываем текущий процесс
+            bat_file = self.app_dir / "update.bat"
+            subprocess.Popen(["cmd", "/c", str(bat_file)], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            sys.exit(0)
             
         except Exception as e:
             self.logger.error(f"Git update failed: {e}")

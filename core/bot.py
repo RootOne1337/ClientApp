@@ -117,9 +117,14 @@ class VirtBot:
     
     async def _cmd_restart(self, params: Dict) -> str:
         """Команда: перезапустить бота"""
-        import os
+        import subprocess
         import sys
-        os.execv(sys.executable, [sys.executable, "main.py"])
+        from config import APP_DIR
+        
+        # Запускаем батник и закрываем текущий процесс
+        bat_file = APP_DIR / "restart.bat"
+        subprocess.Popen(["cmd", "/c", str(bat_file)], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        sys.exit(0)
         return "Restarting..."
     
     async def _cmd_screenshot(self, params: Dict) -> str:
