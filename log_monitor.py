@@ -17,8 +17,8 @@ from pathlib import Path
 from datetime import datetime
 from config import LOGS_DIR, settings
 
-# Уровни логов для отправки на сервер
-SEND_LEVELS = ["ERROR", "CRITICAL", "WARN"]
+# Уровни логов для отправки на сервер (все уровни для дебага)
+SEND_LEVELS = ["DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL"]
 
 # Сколько строк хранить в буфере при краше
 CRASH_CONTEXT_LINES = 20
