@@ -1,0 +1,11 @@
+httpx==0.26.0
+pynput==1.7.6
+mss==9.0.1
+pytesseract==0.3.10
+Pillow==10.2.0
+opencv-python==4.9.0.80
+numpy==1.26.3
+pywin32==306
+pywinauto==0.6.8
+websockets==12.0
+python-dotenv==1.0.0
