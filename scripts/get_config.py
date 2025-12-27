@@ -1,7 +1,11 @@
 """
 Account Config Fetcher
 
-Gets account configuration from GTA5RP API based on external IP.
+Gets account configuration and credentials from API.
+Uses separate endpoints for flexibility:
+- /api/v1/config-only - account data (logins, passwords)
+- /api/v1/credentials - Google Sheets credentials (can be disabled later)
+
 Saves to data/account.json and data/credentials.json
 
 Returns:
@@ -50,10 +54,9 @@ def get_external_ip() -> str:
             return ""
 
 
-def get_config_from_api(ip: str) -> dict:
-    """Получить конфигурацию с API сервера"""
+def get_jwt_token(ip: str) -> str:
+    """Получить JWT токен для API"""
     try:
-        # Получаем токен
         token_url = f"{settings.CONFIG_API_URL}/api/v1/auth/token"
         token_data = {
             "ip": ip,
@@ -61,7 +64,7 @@ def get_config_from_api(ip: str) -> dict:
         }
         headers = {"X-Forwarded-For": ip}
         
-        token_response = requests.post(
+        response = requests.post(
             token_url,
             json=token_data,
             headers=headers,
@@ -69,42 +72,75 @@ def get_config_from_api(ip: str) -> dict:
             verify=False
         )
         
-        if token_response.status_code != 200:
-            logger.error(f"Token error: {token_response.status_code}")
-            return {}
+        if response.status_code != 200:
+            logger.error(f"Token error: {response.status_code}")
+            return ""
         
-        access_token = token_response.json().get("access_token")
-        logger.info("✅ Token obtained")
+        return response.json().get("access_token", "")
         
-        # Получаем конфиг
-        config_url = f"{settings.CONFIG_API_URL}/api/v1/config"
+    except Exception as e:
+        logger.error(f"Token request failed: {e}")
+        return ""
+
+
+def get_account_config(token: str, ip: str) -> dict:
+    """Получить конфигурацию аккаунта (БЕЗ credentials)"""
+    try:
+        config_url = f"{settings.CONFIG_API_URL}/api/v1/config-only"
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {token}",
             "X-Forwarded-For": ip
         }
         
-        config_response = requests.get(
+        response = requests.get(
             config_url,
             headers=headers,
             timeout=10,
             verify=False
         )
         
-        if config_response.status_code != 200:
-            logger.error(f"Config error: {config_response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Config error: {response.status_code}")
             return {}
         
-        return config_response.json()
+        return response.json()
         
     except Exception as e:
-        logger.error(f"API request failed: {e}")
+        logger.error(f"Config request failed: {e}")
+        return {}
+
+
+def get_google_credentials(token: str, ip: str) -> dict:
+    """Получить Google credentials (отдельный запрос)"""
+    try:
+        creds_url = f"{settings.CONFIG_API_URL}/api/v1/credentials"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Forwarded-For": ip
+        }
+        
+        response = requests.get(
+            creds_url,
+            headers=headers,
+            timeout=10,
+            verify=False
+        )
+        
+        if response.status_code != 200:
+            # Не критично — credentials могут быть не нужны
+            logger.warning(f"Credentials not available: {response.status_code}")
+            return {}
+        
+        return response.json().get("google_credentials", {})
+        
+    except Exception as e:
+        logger.warning(f"Credentials request failed: {e}")
         return {}
 
 
 def save_account_config(config: dict) -> bool:
     """Сохранить конфигурацию аккаунта в JSON"""
     try:
-        # Извлекаем нужные поля
         account_data = {
             "active_character": config.get("active_character", ""),
             "email": config.get("email", ""),
@@ -118,7 +154,6 @@ def save_account_config(config: dict) -> bool:
             "epic_password": config.get("epic_password", ""),
         }
         
-        # Сохраняем
         DATA_DIR.mkdir(exist_ok=True)
         with open(ACCOUNT_FILE, "w", encoding="utf-8") as f:
             json.dump(account_data, f, indent=2, ensure_ascii=False)
@@ -130,17 +165,16 @@ def save_account_config(config: dict) -> bool:
         return False
 
 
-def save_credentials(config: dict) -> bool:
+def save_credentials(credentials: dict) -> bool:
     """Сохранить Google credentials в JSON"""
     try:
-        google_credentials = config.get("google_credentials")
-        if not google_credentials:
-            logger.info("No Google credentials in config (skipping)")
+        if not credentials:
+            logger.info("No Google credentials (skipping)")
             return True
         
         DATA_DIR.mkdir(exist_ok=True)
         with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-            json.dump(google_credentials, f, indent=2, ensure_ascii=False)
+            json.dump(credentials, f, indent=2, ensure_ascii=False)
         
         logger.info(f"✅ Google credentials saved to {CREDENTIALS_FILE}")
         return True
@@ -164,6 +198,11 @@ def fetch_config() -> bool:
     """
     Получить и сохранить конфигурацию аккаунта.
     
+    Делает 3 запроса:
+    1. /auth/token - получить JWT
+    2. /config-only - получить данные аккаунта
+    3. /credentials - получить Google credentials (опционально)
+    
     Returns:
         True если успешно
         False если ошибка
@@ -172,7 +211,7 @@ def fetch_config() -> bool:
     logger.info("📦 Fetching Account Config")
     logger.info("=" * 50)
     
-    # Получаем IP
+    # 1. Получаем IP
     external_ip = get_external_ip()
     if not external_ip:
         logger.error("❌ Failed to get external IP")
@@ -180,19 +219,33 @@ def fetch_config() -> bool:
     
     logger.info(f"IP: {external_ip}")
     
-    # Получаем конфиг
-    config = get_config_from_api(external_ip)
+    # 2. Получаем JWT токен
+    logger.info("📍 Step 1: Getting JWT token...")
+    token = get_jwt_token(external_ip)
+    if not token:
+        logger.error("❌ Failed to get token")
+        return False
+    logger.info("✅ Token obtained")
+    
+    # 3. Получаем конфиг аккаунта
+    logger.info("📍 Step 2: Getting account config...")
+    config = get_account_config(token, external_ip)
     if not config:
-        logger.error("❌ Failed to get config from API")
+        logger.error("❌ Failed to get config")
         return False
     
-    # Сохраняем
     if not save_account_config(config):
         return False
     
-    save_credentials(config)  # Опционально
+    # 4. Получаем credentials (опционально)
+    logger.info("📍 Step 3: Getting credentials...")
+    credentials = get_google_credentials(token, external_ip)
+    save_credentials(credentials)  # Не критично если не получится
     
+    logger.info("")
+    logger.info("=" * 50)
     logger.info("✅ Config fetched successfully!")
+    logger.info("=" * 50)
     return True
 
 
