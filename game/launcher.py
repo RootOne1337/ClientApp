@@ -95,30 +95,40 @@ def run_exe(exe_path: str, cwd: str = None, wait: bool = False, timeout: int = N
     logger.info(f"   CWD: {cwd}")
     
     try:
+        # Сохраняем текущую директорию
+        original_cwd = os.getcwd()
+        
+        # Переходим в нужную директорию перед запуском
+        os.chdir(cwd)
+        
         if wait:
-            # Запустить и ждать
+            # Запустить и ждать через subprocess (с shell=True для обхода elevation)
             result = subprocess.run(
-                [str(exe)],
-                cwd=cwd,
+                f'"{exe_path}"',
+                shell=True,
                 timeout=timeout,
                 capture_output=True,
                 text=True
             )
+            os.chdir(original_cwd)
             logger.info(f"   Exit code: {result.returncode}")
             return result.returncode == 0
         else:
-            # Запустить в фоне
-            subprocess.Popen(
-                [str(exe)],
-                cwd=cwd,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            # Запустить в фоне через os.startfile (нативный запуск Windows)
+            os.startfile(str(exe))
+            time.sleep(1)  # Даём время на запуск
+            os.chdir(original_cwd)
             return True
             
     except subprocess.TimeoutExpired:
+        os.chdir(original_cwd)
         logger.warning(f"⚠️  Timeout waiting for {exe.name}")
         return False
     except Exception as e:
+        try:
+            os.chdir(original_cwd)
+        except:
+            pass
         logger.error(f"❌ Failed to run {exe.name}: {e}")
         return False
 
