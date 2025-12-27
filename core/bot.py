@@ -43,6 +43,11 @@ class VirtBot:
         self.logger.info("✅ Bot started successfully")
         await self.api.send_log("info", "Bot started")
         
+        # Запуск startup скриптов если можно фармить
+        can_farm = getattr(self, 'can_farm', False)
+        if can_farm:
+            await self._run_startup_scripts()
+        
         # Запуск фоновых задач
         tasks = [
             asyncio.create_task(self._heartbeat_loop()),
@@ -56,6 +61,52 @@ class VirtBot:
             self.logger.info("Bot tasks cancelled")
         finally:
             await self.api.close()
+    
+    async def _run_startup_scripts(self):
+        """Запуск скриптов инициализации"""
+        self.logger.info("")
+        self.logger.info("=" * 50)
+        self.logger.info("🔧 Running startup scripts...")
+        self.logger.info("=" * 50)
+        
+        # 1. Синхронизация времени
+        try:
+            from scripts.set_local_time import sync_time
+            self.logger.info("📍 Step 1: Time sync")
+            if sync_time():
+                self.logger.info("✅ Time synced")
+            else:
+                self.logger.warning("⚠️  Time sync failed (continuing)")
+        except Exception as e:
+            self.logger.error(f"Time sync error: {e}")
+        
+        # 2. Настройки GTA
+        try:
+            from scripts.update_gta_settings import update_gta_settings
+            self.logger.info("📍 Step 2: GTA settings")
+            if update_gta_settings():
+                self.logger.info("✅ GTA settings updated")
+            else:
+                self.logger.warning("⚠️  GTA settings failed (continuing)")
+        except Exception as e:
+            self.logger.error(f"GTA settings error: {e}")
+        
+        # 3. Получение конфига аккаунта
+        try:
+            from scripts.get_config import fetch_config
+            self.logger.info("📍 Step 3: Fetch account config")
+            if fetch_config():
+                self.logger.info("✅ Account config fetched")
+            else:
+                self.logger.warning("⚠️  Config fetch failed (continuing)")
+        except Exception as e:
+            self.logger.error(f"Config fetch error: {e}")
+        
+        self.logger.info("")
+        self.logger.info("=" * 50)
+        self.logger.info("✅ Startup scripts completed!")
+        self.logger.info("=" * 50)
+        self.logger.info("")
     
     async def _heartbeat_loop(self):
         """Отправка heartbeat каждые N секунд"""
