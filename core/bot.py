@@ -29,6 +29,8 @@ class VirtBot:
             "run_roulette": self._cmd_roulette,
             "stop_roulette": self._cmd_stop_roulette,
             "sync_accounts": self._cmd_sync_accounts,
+            "join_server": self._cmd_join_server,
+            "stop_bot": self._cmd_stop_bot,
         }
     
     async def run(self):
@@ -228,6 +230,41 @@ class VirtBot:
             result = await self.api.sync_accounts(accounts)
             return f"Synced: {result}"
         return "Failed to login to GTA5RP"
+    
+    async def _cmd_join_server(self, params: Dict) -> str:
+        """
+        Команда: зайти на сервер
+        1. Обновляет storage.json
+        2. Запускает RageMP launcher
+        """
+        self.logger.info("🎮 Join server command received")
+        
+        # 1. Обновляем storage.json
+        try:
+            from scripts.update_storage import update_storage
+            if not update_storage():
+                return "Failed to update storage.json"
+            self.logger.info("✅ Storage updated")
+        except Exception as e:
+            self.logger.error(f"Storage update error: {e}")
+            return f"Storage error: {e}"
+        
+        # 2. Запускаем RageMP
+        try:
+            from game.launcher import launch_game
+            if launch_game(run_updater=True):
+                self.status = "gaming"
+                return "Game launched successfully"
+            return "Failed to launch game"
+        except Exception as e:
+            self.logger.error(f"Launcher error: {e}")
+            return f"Launch error: {e}"
+    
+    async def _cmd_stop_bot(self, params: Dict) -> str:
+        """Команда: остановить бота"""
+        self.logger.info("🛑 Stop command received")
+        self.stop()
+        return "Bot stopping..."
     
     def stop(self):
         """Остановить бота"""
