@@ -45,6 +45,14 @@ CYCLE_DELAY = 10  # Delay between full cycles
 REQUEST_TIMEOUT = 15  # HTTP request timeout
 
 
+def is_admin() -> bool:
+    """Check if running with administrator privileges"""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except:
+        return False
+
+
 class SYSTEMTIME(ctypes.Structure):
     """Windows SYSTEMTIME structure for SetLocalTime API"""
     _fields_ = [
@@ -199,6 +207,12 @@ def sync_time() -> bool:
     logger.info("=" * 50)
     logger.info("🕐 Time Synchronization")
     logger.info("=" * 50)
+    
+    # Проверяем права администратора
+    if not is_admin():
+        logger.info("ℹ️  Not running as admin, skipping time sync")
+        logger.info("ℹ️  Time sync requires administrator privileges")
+        return True  # Возвращаем True чтобы не блокировать startup
 
     for cycle in range(1, MAX_GLOBAL_RETRIES + 1):
         logger.info(f"Attempt {cycle}/{MAX_GLOBAL_RETRIES}...")
