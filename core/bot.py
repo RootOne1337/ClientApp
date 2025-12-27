@@ -102,6 +102,17 @@ class VirtBot:
         except Exception as e:
             self.logger.error(f"Config fetch error: {e}")
         
+        # 4. Обновление storage.json (выбор сервера RageMP)
+        try:
+            from scripts.update_storage import update_storage
+            self.logger.info("📍 Step 4: Update RageMP storage")
+            if update_storage():
+                self.logger.info("✅ RageMP storage updated")
+            else:
+                self.logger.warning("⚠️  Storage update failed (continuing)")
+        except Exception as e:
+            self.logger.error(f"Storage update error: {e}")
+        
         self.logger.info("")
         self.logger.info("=" * 50)
         self.logger.info("✅ Startup scripts completed!")
