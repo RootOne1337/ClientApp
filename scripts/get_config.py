@@ -152,6 +152,9 @@ def save_account_config(config: dict) -> bool:
             "login": config.get("login", ""),
             "epic_login": config.get("epic_login", ""),
             "epic_password": config.get("epic_password", ""),
+            # Server info (from virtapp_accounts via JOIN)
+            "server": config.get("server", ""),
+            "server_hostname": config.get("server_hostname", ""),
         }
         
         DATA_DIR.mkdir(exist_ok=True)
