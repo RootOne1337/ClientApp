@@ -37,8 +37,8 @@ class Settings:
     # API сервера VirtApp
     API_URL: str = os.getenv("API_URL", "http://gta5rp.leetpc.com/api")
     
-    # API для получения конфига аккаунта
-    CONFIG_API_URL: str = os.getenv("CONFIG_API_URL", "http://gta5rp-api.leetpc.com")
+    # API для получения конфига аккаунта (теперь на нашем сервере)
+    CONFIG_API_URL: str = os.getenv("CONFIG_API_URL", "http://gta5rp.leetpc.com")
     CONFIG_API_SECRET: str = os.getenv("CONFIG_API_SECRET", "gta5rp_api_secret_2025")
     
     # Версия клиента
