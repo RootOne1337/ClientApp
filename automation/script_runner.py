@@ -58,11 +58,40 @@ def click(x: int, y: int, delay_ms: int = 50):
 
 
 def press_key(key: str):
-    """Press and release a key"""
-    vk = VK_CODES.get(key.upper(), ord(key.upper()[0]) if key else 0)
-    ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-    time.sleep(0.05)
-    ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYUP
+    """Press and release a key or key combo (e.g., CTRL+A, ALT+TAB)"""
+    key = key.upper()
+    
+    # Check for key combo
+    if '+' in key:
+        parts = key.split('+')
+        modifiers = []
+        main_key = parts[-1]
+        
+        for mod in parts[:-1]:
+            if mod in VK_CODES:
+                modifiers.append(VK_CODES[mod])
+        
+        # Press modifiers
+        for vk in modifiers:
+            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        time.sleep(0.02)
+        
+        # Press main key
+        main_vk = VK_CODES.get(main_key, ord(main_key[0]) if main_key else 0)
+        ctypes.windll.user32.keybd_event(main_vk, 0, 0, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.keybd_event(main_vk, 0, 2, 0)  # KEYUP
+        
+        # Release modifiers (reverse order)
+        time.sleep(0.02)
+        for vk in reversed(modifiers):
+            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYUP
+    else:
+        # Single key
+        vk = VK_CODES.get(key, ord(key[0]) if key else 0)
+        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYUP
 
 
 def type_text(text: str, delay_ms: int = 30):
@@ -323,15 +352,37 @@ class ScriptRunner:
             logger.warning(f"Script {script_name} has no actions")
             return False
         
-        logger.info(f"Executing script: {script_name} ({len(actions)} actions)")
+        logger.info(f"═══ SCRIPT START: {script_name} ({len(actions)} actions) ═══")
         
         for i, action in enumerate(actions):
-            logger.debug(f"  Action {i+1}/{len(actions)}: {action.get('type')}")
+            action_type = action.get('type', '?')
+            # Build action description
+            if action_type == 'click':
+                desc = f"click({action.get('x')}, {action.get('y')})"
+            elif action_type == 'key':
+                desc = f"key({action.get('key')})"
+            elif action_type == 'type':
+                text = action.get('text', '')[:20] + ('...' if len(action.get('text', '')) > 20 else '')
+                desc = f"type('{text}')"
+            elif action_type == 'wait':
+                desc = f"wait({action.get('ms')}ms)"
+            elif action_type == 'cmd':
+                cmd = action.get('command', '')[:30] + ('...' if len(action.get('command', '')) > 30 else '')
+                desc = f"cmd('{cmd}')"
+            elif action_type == 'call_command':
+                desc = f"call_command({action.get('command')})"
+            elif action_type == 'check_process':
+                desc = f"check_process({action.get('process')})"
+            else:
+                desc = str(action)[:40]
+            
+            logger.info(f"  [{i+1}/{len(actions)}] {desc}")
+            
             if not self.execute_action(action):
-                logger.error(f"Script {script_name} stopped at action {i+1}")
+                logger.error(f"═══ SCRIPT FAILED: {script_name} at action {i+1} ═══")
                 return False
         
-        logger.info(f"Script {script_name} completed successfully")
+        logger.info(f"═══ SCRIPT DONE: {script_name} ═══")
         return True
     
     def check_triggers(self) -> List[str]:
