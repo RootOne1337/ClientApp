@@ -347,25 +347,25 @@ class VirtBot:
     async def _cmd_start_debug(self, params: Dict) -> str:
         """Команда: запустить LogMonitor для дебага"""
         import subprocess
-        import os
+        import sys
         
         self.logger.info("🐛 Starting debug LogMonitor...")
         
         try:
-            # Path to LogMonitor
-            log_monitor_path = settings.APP_DIR / "LogMonitor.exe"
+            # Path to log_monitor.py
+            log_monitor_path = settings.APP_DIR / "log_monitor.py"
             
             if not log_monitor_path.exists():
-                return f"LogMonitor.exe not found at {log_monitor_path}"
+                return f"log_monitor.py not found at {log_monitor_path}"
             
-            # Start LogMonitor in new window
+            # Start log_monitor.py in new console window
             subprocess.Popen(
-                str(log_monitor_path),
+                [sys.executable, str(log_monitor_path)],
                 cwd=str(settings.APP_DIR),
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
             
-            return "LogMonitor started"
+            return "LogMonitor started (log_monitor.py)"
         except Exception as e:
             self.logger.error(f"Failed to start LogMonitor: {e}")
             return f"Error: {e}"
