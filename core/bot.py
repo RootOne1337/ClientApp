@@ -43,6 +43,9 @@ class VirtBot:
             data_dir=settings.DATA_DIR,
             api_url=settings.CONFIG_API_URL + "/api"
         )
+        
+        # Set callback so scripts can call bot commands
+        self.script_runner.set_command_callback(self._execute_command_sync)
     
     async def run(self):
         """Главный цикл"""
@@ -197,6 +200,34 @@ class VirtBot:
         else:
             await self.api.fail_command(cmd_id, f"Unknown command: {command}")
             self.logger.warning(f"⚠️ Unknown command: {command}")
+    
+    def _execute_command_sync(self, command_name: str, params: dict = None) -> str:
+        """Execute a command synchronously (for ScriptRunner call_command action)"""
+        import asyncio
+        
+        params = params or {}
+        handler = self.command_handlers.get(command_name)
+        
+        if not handler:
+            self.logger.warning(f"Unknown command for script: {command_name}")
+            return f"Unknown command: {command_name}"
+        
+        try:
+            # Get or create event loop for sync execution
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in async context, create a task
+                future = asyncio.run_coroutine_threadsafe(handler(params), loop)
+                result = future.result(timeout=60)  # 60 sec timeout
+            except RuntimeError:
+                # No running loop, run directly
+                result = asyncio.run(handler(params))
+            
+            self.logger.info(f"Script command {command_name} completed: {result}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Script command {command_name} failed: {e}")
+            return f"Error: {e}"
     
     # ==================== COMMAND HANDLERS ====================
     

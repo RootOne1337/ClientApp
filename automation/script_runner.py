@@ -152,11 +152,18 @@ class ScriptRunner:
         self.scan_thread: Optional[threading.Thread] = None
         self.scan_interval = 5  # seconds
         
+        # Callback for call_command action (set by Bot)
+        self.command_callback = None
+        
         # Load account config for variables
         self._load_account_config()
         
         # Load cached scripts
         self._load_cached_scripts()
+    
+    def set_command_callback(self, callback):
+        """Set callback function for call_command action. Callback should accept (command_name, params) and return result."""
+        self.command_callback = callback
     
     def _load_account_config(self):
         """Load account.json for variable substitution"""
@@ -270,6 +277,23 @@ class ScriptRunner:
                     time.sleep(5)
                 logger.warning(f"Process {process} not found after 60s")
                 return False
+            
+            elif action_type == 'call_command':
+                command_name = action.get('command', '')
+                params = action.get('params', {})
+                logger.debug(f"Call command: {command_name}")
+                
+                if self.command_callback:
+                    try:
+                        result = self.command_callback(command_name, params)
+                        logger.info(f"Command {command_name} returned: {result}")
+                        return True
+                    except Exception as e:
+                        logger.error(f"Command {command_name} failed: {e}")
+                        return False
+                else:
+                    logger.warning("No command callback set, cannot execute call_command")
+                    return False
             
             else:
                 logger.warning(f"Unknown action type: {action_type}")

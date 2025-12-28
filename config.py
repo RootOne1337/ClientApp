@@ -34,6 +34,13 @@ STATE_FILE = DATA_DIR / "state.json"           # Состояние бота
 
 
 class Settings:
+    # Directories
+    APP_DIR: Path = APP_DIR
+    DATA_DIR: Path = DATA_DIR
+    LOGS_DIR: Path = LOGS_DIR
+    SCREENSHOTS_DIR: Path = SCREENSHOTS_DIR
+    SCRIPTS_DIR: Path = SCRIPTS_DIR
+    
     # API сервера VirtApp
     API_URL: str = os.getenv("API_URL", "http://gta5rp.leetpc.com/api")
     
