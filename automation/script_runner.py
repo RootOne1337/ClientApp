@@ -155,6 +155,10 @@ class ScriptRunner:
         # Callback for call_command action (set by Bot)
         self.command_callback = None
         
+        # Cooldown tracking: script_name -> time when can trigger again
+        self.cooldown_until: Dict[str, float] = {}
+        self.default_cooldown = 60  # seconds between same trigger
+        
         # Load account config for variables
         self._load_account_config()
         
@@ -366,12 +370,7 @@ class ScriptRunner:
         
         while self.running:
             try:
-                # Only scan if GTA5 is running
-                if not is_process_running("GTA5.exe"):
-                    time.sleep(self.scan_interval)
-                    continue
-                
-                triggered = self.check_triggers()
+                triggered = self.check_all_triggers()
                 
                 for script_name in triggered:
                     logger.info(f"Auto-executing triggered script: {script_name}")
@@ -384,6 +383,77 @@ class ScriptRunner:
             time.sleep(self.scan_interval)
         
         logger.info("Trigger scanner stopped")
+    
+    def check_all_triggers(self) -> List[str]:
+        """Check all trigger types: pixels and process_trigger"""
+        triggered = []
+        
+        for name, script in self.scripts.items():
+            if not script.get('enabled', True):
+                continue
+            
+            # Check cooldown - skip if recently triggered
+            if name in self.cooldown_until:
+                if time.time() < self.cooldown_until[name]:
+                    continue  # Still in cooldown
+            
+            config = script.get('config', {})
+            cooldown = config.get('cooldown', self.default_cooldown)
+            
+            # Check process_trigger
+            process_trigger = config.get('process_trigger', {})
+            if process_trigger:
+                process_name = process_trigger.get('process', '')
+                condition = process_trigger.get('condition', 'running')
+                
+                if process_name:
+                    is_running = is_process_running(process_name)
+                    
+                    if condition == 'not_running' and not is_running:
+                        logger.info(f"Process trigger: {process_name} not running → {name}")
+                        triggered.append(name)
+                        self.cooldown_until[name] = time.time() + cooldown
+                        continue
+                    elif condition == 'running' and is_running:
+                        # Also check pixel triggers if process is running
+                        pass
+            
+            # Check pixel triggers (only if GTA5 is running for performance)
+            pixels = config.get('pixels', {})
+            if pixels and is_process_running("GTA5.exe"):
+                for trigger_name, pixel in pixels.items():
+                    x, y = pixel.get('x', 0), pixel.get('y', 0)
+                    expected_color = pixel.get('color', '#FF0000')
+                    tolerance = pixel.get('tolerance', 10)
+                    
+                    actual = get_pixel_color(x, y)
+                    expected = hex_to_rgb(expected_color)
+                    
+                    if color_match(actual, expected, tolerance):
+                        logger.info(f"Pixel trigger matched: {name}.{trigger_name}")
+                        triggered.append(name)
+                        break
+        
+        return triggered
+    
+    def run_startup_scripts(self):
+        """Execute all scripts marked with run_on_startup: true"""
+        logger.info("Running startup scripts...")
+        
+        for name, script in self.scripts.items():
+            if not script.get('enabled', True):
+                continue
+            
+            config = script.get('config', {})
+            
+            if config.get('run_on_startup', False):
+                logger.info(f"Startup script: {name}")
+                try:
+                    self.execute_script(name)
+                except Exception as e:
+                    logger.error(f"Startup script {name} failed: {e}")
+        
+        logger.info("Startup scripts completed")
     
     def start(self):
         """Start the trigger scanner"""

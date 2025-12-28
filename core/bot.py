@@ -131,9 +131,17 @@ class VirtBot:
         except Exception as e:
             self.logger.error(f"Scripts sync error: {e}")
         
-        # 5. Start trigger scanner
+        # 5. Run startup scripts (run_on_startup: true)
         try:
-            self.logger.info("📍 Step 5: Starting script trigger scanner")
+            self.logger.info("📍 Step 5: Running startup scripts (run_on_startup)")
+            self.script_runner.run_startup_scripts()
+            self.logger.info("✅ Startup scripts executed")
+        except Exception as e:
+            self.logger.error(f"Startup scripts error: {e}")
+        
+        # 6. Start trigger scanner
+        try:
+            self.logger.info("📍 Step 6: Starting script trigger scanner")
             self.script_runner.start()
             self.logger.info("✅ Script trigger scanner started")
         except Exception as e:
