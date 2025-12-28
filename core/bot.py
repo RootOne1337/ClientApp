@@ -104,16 +104,8 @@ class VirtBot:
         except Exception as e:
             self.logger.error(f"Config fetch error: {e}")
         
-        # 4. Обновление storage.json (выбор сервера RageMP)
-        try:
-            from scripts.update_storage import update_storage
-            self.logger.info("📍 Step 4: Update RageMP storage")
-            if update_storage():
-                self.logger.info("✅ RageMP storage updated")
-            else:
-                self.logger.warning("⚠️  Storage update failed (continuing)")
-        except Exception as e:
-            self.logger.error(f"Storage update error: {e}")
+        # Note: Server connection через реестр Windows при вызове join_server
+        # Больше не нужно обновлять storage.json при старте
         
         self.logger.info("")
         self.logger.info("=" * 50)
@@ -234,28 +226,18 @@ class VirtBot:
     async def _cmd_join_server(self, params: Dict) -> str:
         """
         Команда: зайти на сервер
-        1. Обновляет storage.json
-        2. Запускает RageMP launcher
+        Использует Windows Registry для прямого подключения (без кликов!)
         """
         self.logger.info("🎮 Join server command received")
         
-        # 1. Обновляем storage.json
         try:
-            from scripts.update_storage import update_storage
-            if not update_storage():
-                return "Failed to update storage.json"
-            self.logger.info("✅ Storage updated")
-        except Exception as e:
-            self.logger.error(f"Storage update error: {e}")
-            return f"Storage error: {e}"
-        
-        # 2. Запускаем RageMP
-        try:
-            from game.launcher import launch_game
-            if launch_game(run_updater=True):
+            from game.launcher import launch_and_connect
+            
+            if launch_and_connect():
                 self.status = "gaming"
-                return "Game launched successfully"
+                return "Game launched and connecting to server!"
             return "Failed to launch game"
+            
         except Exception as e:
             self.logger.error(f"Launcher error: {e}")
             return f"Launch error: {e}"
