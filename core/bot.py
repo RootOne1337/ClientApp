@@ -36,6 +36,7 @@ class VirtBot:
             "run_script": self._cmd_run_script,
             "start_scripts": self._cmd_start_scripts,
             "stop_scripts": self._cmd_stop_scripts,
+            "start_debug": self._cmd_start_debug,
         }
         
         # ScriptRunner for automation
@@ -342,6 +343,32 @@ class VirtBot:
         self.logger.info("⏹️ Stopping scripts scanner")
         self.script_runner.stop()
         return "Scripts trigger scanner stopped"
+    
+    async def _cmd_start_debug(self, params: Dict) -> str:
+        """Команда: запустить LogMonitor для дебага"""
+        import subprocess
+        import os
+        
+        self.logger.info("🐛 Starting debug LogMonitor...")
+        
+        try:
+            # Path to LogMonitor
+            log_monitor_path = settings.APP_DIR / "LogMonitor.exe"
+            
+            if not log_monitor_path.exists():
+                return f"LogMonitor.exe not found at {log_monitor_path}"
+            
+            # Start LogMonitor in new window
+            subprocess.Popen(
+                str(log_monitor_path),
+                cwd=str(settings.APP_DIR),
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            
+            return "LogMonitor started"
+        except Exception as e:
+            self.logger.error(f"Failed to start LogMonitor: {e}")
+            return f"Error: {e}"
     
     def stop(self):
         """Остановить бота"""
