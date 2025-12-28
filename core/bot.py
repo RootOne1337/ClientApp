@@ -1,9 +1,11 @@
 import asyncio
+from pathlib import Path
 from typing import Dict, Any, Callable
 from config import settings
 from network import APIClient
 from core.updater import Updater
 from utils import get_logger
+from automation.script_runner import ScriptRunner
 
 
 class VirtBot:
@@ -31,7 +33,16 @@ class VirtBot:
             "sync_accounts": self._cmd_sync_accounts,
             "join_server": self._cmd_join_server,
             "stop_bot": self._cmd_stop_bot,
+            "run_script": self._cmd_run_script,
+            "start_scripts": self._cmd_start_scripts,
+            "stop_scripts": self._cmd_stop_scripts,
         }
+        
+        # ScriptRunner for automation
+        self.script_runner = ScriptRunner(
+            data_dir=settings.DATA_DIR,
+            api_url=settings.CONFIG_API_URL + "/api"
+        )
     
     async def run(self):
         """Главный цикл"""
@@ -106,6 +117,24 @@ class VirtBot:
         
         # Note: Server connection через реестр Windows при вызове join_server
         # Больше не нужно обновлять storage.json при старте
+        
+        # 4. Sync scripts from server
+        try:
+            self.logger.info("📍 Step 4: Sync automation scripts")
+            if self.script_runner.sync_from_server():
+                self.logger.info("✅ Scripts synced from server")
+            else:
+                self.logger.warning("⚠️  Scripts sync failed (using cached)")
+        except Exception as e:
+            self.logger.error(f"Scripts sync error: {e}")
+        
+        # 5. Start trigger scanner
+        try:
+            self.logger.info("📍 Step 5: Starting script trigger scanner")
+            self.script_runner.start()
+            self.logger.info("✅ Script trigger scanner started")
+        except Exception as e:
+            self.logger.error(f"Script scanner error: {e}")
         
         self.logger.info("")
         self.logger.info("=" * 50)
@@ -248,6 +277,34 @@ class VirtBot:
         self.stop()
         return "Bot stopping..."
     
+    async def _cmd_run_script(self, params: Dict) -> str:
+        """Команда: запустить скрипт по имени"""
+        script_name = params.get("script_name", params.get("name", ""))
+        if not script_name:
+            return "Error: script_name required"
+        
+        self.logger.info(f"📜 Running script: {script_name}")
+        
+        try:
+            if self.script_runner.execute_script(script_name):
+                return f"Script '{script_name}' completed"
+            return f"Script '{script_name}' failed"
+        except Exception as e:
+            return f"Script error: {e}"
+    
+    async def _cmd_start_scripts(self, params: Dict) -> str:
+        """Команда: запустить сканер триггеров"""
+        self.logger.info("▶️ Starting scripts scanner")
+        self.script_runner.start()
+        return "Scripts trigger scanner started"
+    
+    async def _cmd_stop_scripts(self, params: Dict) -> str:
+        """Команда: остановить сканер триггеров"""
+        self.logger.info("⏹️ Stopping scripts scanner")
+        self.script_runner.stop()
+        return "Scripts trigger scanner stopped"
+    
     def stop(self):
         """Остановить бота"""
+        self.script_runner.stop()
         self.running = False
