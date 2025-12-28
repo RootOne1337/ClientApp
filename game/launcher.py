@@ -305,11 +305,22 @@ def launch_and_connect(server_hostname: str = None, server_port: str = "22005") 
         logger.error("❌ Failed to set server in registry")
         return False
     
-    # 3. Запускаем RageMP
-    logger.info("📍 Step 3: Launching RageMP...")
-    if not run_ragemp_launcher():
-        logger.error("❌ Failed to launch RageMP")
-        return False
+    # 3. Запускаем updater.exe (он сам запустит ragemp_v.exe после обновления)
+    logger.info("📍 Step 3: Launching RageMP via updater.exe...")
+    paths = get_game_paths()
+    updater_path = paths["ragemp_updater"]
+    ragemp_dir = paths["ragemp_dir"]
+    
+    if not Path(updater_path).exists():
+        # Если updater нет - пробуем ragemp_v.exe напрямую
+        logger.warning("⚠️  updater.exe not found, trying ragemp_v.exe...")
+        if not run_ragemp_launcher():
+            logger.error("❌ Failed to launch RageMP")
+            return False
+    else:
+        if not run_exe(exe_path=updater_path, cwd=ragemp_dir, wait=False):
+            logger.error("❌ Failed to launch updater.exe")
+            return False
     
     # 4. Ждём запуска GTA
     logger.info("📍 Step 4: Waiting for GTA5.exe...")
