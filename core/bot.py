@@ -455,8 +455,9 @@ class VirtBot:
                 self.logger.error("No GTA5RP credentials in account config")
                 return "No credentials"
             
-            # Get machine ID from last heartbeat
-            machine_id = str(getattr(self, 'machine_id', settings.PC_NAME))
+            # Get machine ID from last heartbeat or computer name
+            import platform
+            machine_id = str(getattr(self, 'machine_id', None) or platform.node())
             
             success = sync_profile(
                 login=login,
