@@ -531,20 +531,48 @@ class ScriptRunner:
             # Check pixel triggers (only if GTA5 is running for performance)
             pixels = config.get('pixels', {})
             if pixels and is_process_running("GTA5.exe"):
-                for trigger_name, pixel in pixels.items():
-                    x, y = pixel.get('x', 0), pixel.get('y', 0)
-                    expected_color = pixel.get('color', '#FF0000')
-                    tolerance = pixel.get('tolerance', 10)
+                pixel_logic = config.get('pixel_logic', 'or')  # Default: OR
+                
+                if pixel_logic == 'and':
+                    # AND logic: ALL pixels must match
+                    all_matched = True
+                    matched_names = []
                     
-                    actual = get_pixel_color(x, y)
-                    expected = hex_to_rgb(expected_color)
+                    for trigger_name, pixel in pixels.items():
+                        x, y = pixel.get('x', 0), pixel.get('y', 0)
+                        expected_color = pixel.get('color', '#FF0000')
+                        tolerance = pixel.get('tolerance', 10)
+                        
+                        actual = get_pixel_color(x, y)
+                        expected = hex_to_rgb(expected_color)
+                        
+                        if color_match(actual, expected, tolerance):
+                            matched_names.append(trigger_name)
+                        else:
+                            all_matched = False
+                            break
                     
-                    if color_match(actual, expected, tolerance):
+                    if all_matched and matched_names:
                         cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
-                        logger.info(f"Pixel trigger matched: {name}.{trigger_name} (cooldown: {cooldown}s)")
+                        logger.info(f"Pixel triggers ALL matched: {name} [{', '.join(matched_names)}] (cooldown: {cooldown}s)")
                         triggered.append(name)
                         self.cooldown_until[name] = time.time() + cooldown
-                        break
+                else:
+                    # OR logic: ANY pixel matches (default)
+                    for trigger_name, pixel in pixels.items():
+                        x, y = pixel.get('x', 0), pixel.get('y', 0)
+                        expected_color = pixel.get('color', '#FF0000')
+                        tolerance = pixel.get('tolerance', 10)
+                        
+                        actual = get_pixel_color(x, y)
+                        expected = hex_to_rgb(expected_color)
+                        
+                        if color_match(actual, expected, tolerance):
+                            cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
+                            logger.info(f"Pixel trigger matched: {name}.{trigger_name} (cooldown: {cooldown}s)")
+                            triggered.append(name)
+                            self.cooldown_until[name] = time.time() + cooldown
+                            break
         
         return triggered
     
