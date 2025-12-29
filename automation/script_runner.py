@@ -528,51 +528,49 @@ class ScriptRunner:
                     self.cooldown_until[name] = time.time() + cooldown
                     continue
             
-            # Check pixel triggers (only if GTA5 is running for performance)
-            pixels = config.get('pixels', {})
-            if pixels and is_process_running("GTA5.exe"):
-                pixel_logic = config.get('pixel_logic', 'or')  # Default: OR
-                
-                if pixel_logic == 'and':
-                    # AND logic: ALL pixels must match
-                    all_matched = True
-                    matched_names = []
+            # Check pixel groups (only if GTA5 is running for performance)
+            # New format: pixel_groups = [{name: 'group1', pixels: [...]}, ...]
+            # Logic: (group1 pixels AND) OR (group2 pixels AND) OR ...
+            pixel_groups = config.get('pixel_groups', [])
+            
+            # Backward compatibility: convert old flat pixels to single group
+            if not pixel_groups and config.get('pixels'):
+                old_pixels = config['pixels']
+                pixel_groups = [{
+                    'name': 'legacy',
+                    'pixels': [{'x': p.get('x', 0), 'y': p.get('y', 0), 'color': p.get('color', '#FF0000')} 
+                               for p in old_pixels.values()]
+                }]
+            
+            if pixel_groups and is_process_running("GTA5.exe"):
+                for group in pixel_groups:
+                    group_name = group.get('name', 'group')
+                    pixels = group.get('pixels', [])
                     
-                    for trigger_name, pixel in pixels.items():
-                        x, y = pixel.get('x', 0), pixel.get('y', 0)
-                        expected_color = pixel.get('color', '#FF0000')
-                        tolerance = pixel.get('tolerance', 10)
+                    if not pixels:
+                        continue
+                    
+                    # AND logic within group: ALL pixels in group must match
+                    all_matched = True
+                    for px in pixels:
+                        x, y = px.get('x', 0), px.get('y', 0)
+                        expected_color = px.get('color', '#FF0000')
+                        tolerance = px.get('tolerance', 10)
                         
                         actual = get_pixel_color(x, y)
                         expected = hex_to_rgb(expected_color)
                         
-                        if color_match(actual, expected, tolerance):
-                            matched_names.append(trigger_name)
-                        else:
+                        if not color_match(actual, expected, tolerance):
                             all_matched = False
                             break
                     
-                    if all_matched and matched_names:
+                    # If all pixels in this group matched → trigger (OR between groups)
+                    if all_matched:
                         cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
-                        logger.info(f"Pixel triggers ALL matched: {name} [{', '.join(matched_names)}] (cooldown: {cooldown}s)")
+                        logger.info(f"Pixel group matched: {name}.{group_name} ({len(pixels)} pixels) (cooldown: {cooldown}s)")
                         triggered.append(name)
                         self.cooldown_until[name] = time.time() + cooldown
-                else:
-                    # OR logic: ANY pixel matches (default)
-                    for trigger_name, pixel in pixels.items():
-                        x, y = pixel.get('x', 0), pixel.get('y', 0)
-                        expected_color = pixel.get('color', '#FF0000')
-                        tolerance = pixel.get('tolerance', 10)
-                        
-                        actual = get_pixel_color(x, y)
-                        expected = hex_to_rgb(expected_color)
-                        
-                        if color_match(actual, expected, tolerance):
-                            cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
-                            logger.info(f"Pixel trigger matched: {name}.{trigger_name} (cooldown: {cooldown}s)")
-                            triggered.append(name)
-                            self.cooldown_until[name] = time.time() + cooldown
-                            break
+                        break  # Stop checking other groups
         
         return triggered
     
