@@ -117,6 +117,28 @@ def type_text(text: str, delay_ms: int = 30):
         time.sleep(delay_ms / 1000)
 
 
+def switch_to_english_layout():
+    """Switch keyboard layout to English (US) using Windows API"""
+    try:
+        # English US layout code
+        ENGLISH_US = 0x0409
+        
+        # Get foreground window
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        
+        # Load English layout
+        hkl = ctypes.windll.user32.LoadKeyboardLayoutW("00000409", 1)
+        
+        # Activate layout for current window
+        # WM_INPUTLANGCHANGEREQUEST = 0x0050
+        ctypes.windll.user32.PostMessageW(hwnd, 0x0050, 0, hkl)
+        
+        time.sleep(0.1)  # Wait for layout switch
+        logger.debug("Switched to English keyboard layout")
+    except Exception as e:
+        logger.warning(f"Failed to switch keyboard layout: {e}")
+
+
 def get_pixel_color(x: int, y: int) -> tuple:
     """Get RGB color of pixel at screen position"""
     hdc = ctypes.windll.user32.GetDC(0)
@@ -284,6 +306,8 @@ class ScriptRunner:
             elif action_type == 'type':
                 text = self.substitute_variables(action.get('text', ''))
                 logger.debug(f"Type text: {text[:20]}...")
+                # Switch to English layout before typing (for passwords etc)
+                switch_to_english_layout()
                 type_text(text)
                 return True
             
