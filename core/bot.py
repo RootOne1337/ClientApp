@@ -41,6 +41,7 @@ class VirtBot:
             "sync_time": self._cmd_sync_time,
             "update_gta_settings": self._cmd_update_gta_settings,
             "fetch_config": self._cmd_fetch_config,
+            "sync_profile": self._cmd_sync_profile,
         }
         
         # ScriptRunner for automation
@@ -436,6 +437,42 @@ class VirtBot:
                 return "Config fetch failed"
         except Exception as e:
             self.logger.error(f"Config fetch error: {e}")
+            return f"Error: {e}"
+    
+    async def _cmd_sync_profile(self, params: Dict) -> str:
+        """Синхронизировать профиль GTA5RP с сервером"""
+        try:
+            from scripts.sync_profile import sync_profile
+            
+            self.logger.info("📊 Syncing GTA5RP profile...")
+            
+            # Get account credentials from config
+            config = self.script_runner.account_config
+            login = config.get('gta_login') or config.get('login')
+            password = config.get('gta_password') or config.get('password')
+            
+            if not login or not password:
+                self.logger.error("No GTA5RP credentials in account config")
+                return "No credentials"
+            
+            # Get machine ID from last heartbeat
+            machine_id = str(getattr(self, 'machine_id', settings.PC_NAME))
+            
+            success = sync_profile(
+                login=login,
+                password=password,
+                server_api_url=settings.CONFIG_API_URL,
+                machine_id=machine_id
+            )
+            
+            if success:
+                self.logger.info("✅ Profile synced successfully")
+                return "Profile synced"
+            else:
+                self.logger.warning("⚠️ Profile sync failed")
+                return "Sync failed"
+        except Exception as e:
+            self.logger.error(f"Profile sync error: {e}")
             return f"Error: {e}"
     
     def stop(self):
