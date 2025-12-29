@@ -492,24 +492,41 @@ class ScriptRunner:
             # Custom cooldown or use defaults (process_trigger = 300s, pixel = 60s)
             custom_cooldown = config.get('cooldown')
             
-            # Check process_trigger
-            process_trigger = config.get('process_trigger', {})
-            if process_trigger:
-                process_name = process_trigger.get('process', '')
-                condition = process_trigger.get('condition', 'running')
+            # Check process_triggers (new array format) with backward compatibility
+            process_triggers = config.get('process_triggers', [])
+            # Backward compatibility: convert old single format to array
+            if not process_triggers and config.get('process_trigger', {}).get('process'):
+                process_triggers = [config['process_trigger']]
+            
+            if process_triggers:
+                # AND logic: all conditions must be true
+                all_conditions_met = True
+                trigger_descriptions = []
                 
-                if process_name:
-                    is_running = is_process_running(process_name)
+                for pt in process_triggers:
+                    process_name = pt.get('process', '')
+                    condition = pt.get('condition', 'running')
                     
-                    if condition == 'not_running' and not is_running:
-                        cooldown = custom_cooldown if custom_cooldown else self.process_trigger_cooldown
-                        logger.info(f"Process trigger: {process_name} not running → {name} (cooldown: {cooldown}s)")
-                        triggered.append(name)
-                        self.cooldown_until[name] = time.time() + cooldown
-                        continue
-                    elif condition == 'running' and is_running:
-                        # Also check pixel triggers if process is running
-                        pass
+                    if process_name:
+                        is_running = is_process_running(process_name)
+                        
+                        if condition == 'not_running':
+                            if is_running:
+                                all_conditions_met = False
+                                break
+                            trigger_descriptions.append(f"{process_name}:OFF")
+                        elif condition == 'running':
+                            if not is_running:
+                                all_conditions_met = False
+                                break
+                            trigger_descriptions.append(f"{process_name}:ON")
+                
+                if all_conditions_met and trigger_descriptions:
+                    cooldown = custom_cooldown if custom_cooldown else self.process_trigger_cooldown
+                    logger.info(f"Process triggers matched: [{', '.join(trigger_descriptions)}] → {name} (cooldown: {cooldown}s)")
+                    triggered.append(name)
+                    self.cooldown_until[name] = time.time() + cooldown
+                    continue
             
             # Check pixel triggers (only if GTA5 is running for performance)
             pixels = config.get('pixels', {})
