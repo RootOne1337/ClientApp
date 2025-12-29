@@ -545,6 +545,11 @@ class ScriptRunner:
                 logger.info(f"Startup script: {name}")
                 try:
                     self.execute_script(name)
+                    
+                    # Set cooldown to prevent immediate re-trigger by process_trigger
+                    cooldown = config.get('cooldown', self.process_trigger_cooldown)
+                    self.cooldown_until[name] = time.time() + cooldown
+                    logger.info(f"Startup script {name} executed, cooldown: {cooldown}s")
                 except Exception as e:
                     logger.error(f"Startup script {name} failed: {e}")
         
