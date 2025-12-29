@@ -117,24 +117,35 @@ def type_text(text: str, delay_ms: int = 30):
         time.sleep(delay_ms / 1000)
 
 
-def switch_to_english_layout():
-    """Switch keyboard layout to English (US) using Windows API"""
+def switch_keyboard_layout(lang: str):
+    """Switch keyboard layout to specified language using Windows API
+    
+    Args:
+        lang: 'en' for English (US), 'ru' for Russian
+    """
+    layout_codes = {
+        'en': '00000409',  # English US
+        'ru': '00000419',  # Russian
+    }
+    
+    layout_code = layout_codes.get(lang.lower())
+    if not layout_code:
+        logger.warning(f"Unknown keyboard layout: {lang}")
+        return
+    
     try:
-        # English US layout code
-        ENGLISH_US = 0x0409
-        
         # Get foreground window
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         
-        # Load English layout
-        hkl = ctypes.windll.user32.LoadKeyboardLayoutW("00000409", 1)
+        # Load layout
+        hkl = ctypes.windll.user32.LoadKeyboardLayoutW(layout_code, 1)
         
         # Activate layout for current window
         # WM_INPUTLANGCHANGEREQUEST = 0x0050
         ctypes.windll.user32.PostMessageW(hwnd, 0x0050, 0, hkl)
         
         time.sleep(0.1)  # Wait for layout switch
-        logger.debug("Switched to English keyboard layout")
+        logger.debug(f"Switched to {lang.upper()} keyboard layout")
     except Exception as e:
         logger.warning(f"Failed to switch keyboard layout: {e}")
 
@@ -305,9 +316,13 @@ class ScriptRunner:
             
             elif action_type == 'type':
                 text = self.substitute_variables(action.get('text', ''))
-                logger.debug(f"Type text: {text[:20]}...")
-                # Switch to English layout before typing (for passwords etc)
-                switch_to_english_layout()
+                lang = action.get('lang')  # Optional: 'en' or 'ru'
+                logger.debug(f"Type text: {text[:20]}..." + (f" (lang={lang})" if lang else ""))
+                
+                # Only switch layout if explicitly specified
+                if lang:
+                    switch_keyboard_layout(lang)
+                
                 type_text(text)
                 return True
             
