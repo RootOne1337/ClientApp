@@ -184,6 +184,15 @@ class VirtBot:
         import asyncio
         
         params = params or {}
+        
+        # Handle sync system commands directly (no async needed)
+        if command_name == 'sync_time':
+            return self._sync_cmd_sync_time()
+        elif command_name == 'update_gta_settings':
+            return self._sync_cmd_update_gta_settings()
+        elif command_name == 'fetch_config':
+            return self._sync_cmd_fetch_config()
+        
         handler = self.command_handlers.get(command_name)
         
         if not handler:
@@ -205,6 +214,51 @@ class VirtBot:
             return result
         except Exception as e:
             self.logger.error(f"Script command {command_name} failed: {e}")
+            return f"Error: {e}"
+    
+    def _sync_cmd_sync_time(self) -> str:
+        """Sync version: Time synchronization"""
+        try:
+            from scripts.set_local_time import sync_time
+            self.logger.info("⏱️ Syncing system time...")
+            if sync_time():
+                self.logger.info("✅ Time synced successfully")
+                return "Time synced"
+            else:
+                self.logger.warning("⚠️ Time sync failed")
+                return "Time sync failed"
+        except Exception as e:
+            self.logger.error(f"Time sync error: {e}")
+            return f"Error: {e}"
+    
+    def _sync_cmd_update_gta_settings(self) -> str:
+        """Sync version: Update GTA settings"""
+        try:
+            from scripts.update_gta_settings import update_gta_settings
+            self.logger.info("🎮 Updating GTA settings...")
+            if update_gta_settings():
+                self.logger.info("✅ GTA settings updated")
+                return "GTA settings updated"
+            else:
+                self.logger.warning("⚠️ GTA settings update failed")
+                return "GTA settings update failed"
+        except Exception as e:
+            self.logger.error(f"GTA settings error: {e}")
+            return f"Error: {e}"
+    
+    def _sync_cmd_fetch_config(self) -> str:
+        """Sync version: Fetch account config"""
+        try:
+            from scripts.get_config import fetch_config
+            self.logger.info("📥 Fetching account config...")
+            if fetch_config():
+                self.logger.info("✅ Account config fetched")
+                return "Config fetched"
+            else:
+                self.logger.warning("⚠️ Config fetch failed")
+                return "Config fetch failed"
+        except Exception as e:
+            self.logger.error(f"Config fetch error: {e}")
             return f"Error: {e}"
     
     # ==================== COMMAND HANDLERS ====================
