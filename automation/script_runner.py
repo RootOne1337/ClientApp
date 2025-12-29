@@ -186,7 +186,8 @@ class ScriptRunner:
         
         # Cooldown tracking: script_name -> time when can trigger again
         self.cooldown_until: Dict[str, float] = {}
-        self.default_cooldown = 60  # seconds between same trigger
+        self.default_cooldown = 60  # seconds between pixel triggers
+        self.process_trigger_cooldown = 300  # 5 min for process triggers (game launch is slow)
         
         # Load account config for variables
         self._load_account_config()
@@ -449,7 +450,8 @@ class ScriptRunner:
                     continue  # Still in cooldown
             
             config = script.get('config', {})
-            cooldown = config.get('cooldown', self.default_cooldown)
+            # Custom cooldown or use defaults (process_trigger = 300s, pixel = 60s)
+            custom_cooldown = config.get('cooldown')
             
             # Check process_trigger
             process_trigger = config.get('process_trigger', {})
@@ -461,7 +463,8 @@ class ScriptRunner:
                     is_running = is_process_running(process_name)
                     
                     if condition == 'not_running' and not is_running:
-                        logger.info(f"Process trigger: {process_name} not running → {name}")
+                        cooldown = custom_cooldown if custom_cooldown else self.process_trigger_cooldown
+                        logger.info(f"Process trigger: {process_name} not running → {name} (cooldown: {cooldown}s)")
                         triggered.append(name)
                         self.cooldown_until[name] = time.time() + cooldown
                         continue
@@ -481,8 +484,10 @@ class ScriptRunner:
                     expected = hex_to_rgb(expected_color)
                     
                     if color_match(actual, expected, tolerance):
-                        logger.info(f"Pixel trigger matched: {name}.{trigger_name}")
+                        cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
+                        logger.info(f"Pixel trigger matched: {name}.{trigger_name} (cooldown: {cooldown}s)")
                         triggered.append(name)
+                        self.cooldown_until[name] = time.time() + cooldown
                         break
         
         return triggered
