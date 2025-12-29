@@ -368,6 +368,56 @@ class ScriptRunner:
                     logger.warning("No command callback set, cannot execute call_command")
                     return False
             
+            elif action_type == 'wait_for_pixel':
+                # Wait for pixel conditions with branching
+                conditions = action.get('conditions', [])
+                timeout_ms = action.get('timeout', 30000)
+                check_interval_ms = action.get('check_interval', 500)
+                on_timeout = action.get('on_timeout', 'exit')
+                
+                logger.info(f"Waiting for pixel ({len(conditions)} conditions, timeout: {timeout_ms}ms)")
+                
+                start_time = time.time()
+                timeout_sec = timeout_ms / 1000
+                check_interval_sec = check_interval_ms / 1000
+                
+                while (time.time() - start_time) < timeout_sec:
+                    # Check each condition
+                    for condition in conditions:
+                        cond_name = condition.get('name', 'unnamed')
+                        pixels = condition.get('pixels', [])
+                        
+                        if not pixels:
+                            continue
+                        
+                        # AND logic: all pixels in condition must match
+                        all_matched = True
+                        for px in pixels:
+                            x, y = px.get('x', 0), px.get('y', 0)
+                            expected_color = px.get('color', '#FF0000')
+                            tolerance = px.get('tolerance', 10)
+                            
+                            actual = get_pixel_color(x, y)
+                            expected = hex_to_rgb(expected_color)
+                            
+                            if not color_match(actual, expected, tolerance):
+                                all_matched = False
+                                break
+                        
+                        if all_matched:
+                            # Condition matched!
+                            cond_action = condition.get('action', 'continue')
+                            logger.info(f"Pixel condition matched: {cond_name} → {cond_action}")
+                            
+                            # Return special result for branching
+                            return {'matched': cond_name, 'action': cond_action}
+                    
+                    time.sleep(check_interval_sec)
+                
+                # Timeout reached
+                logger.warning(f"Pixel wait timeout after {timeout_ms}ms → {on_timeout}")
+                return {'timeout': True, 'action': on_timeout}
+            
             else:
                 logger.warning(f"Unknown action type: {action_type}")
                 return False
@@ -377,7 +427,7 @@ class ScriptRunner:
             return False
     
     def execute_script(self, script_name: str) -> bool:
-        """Execute all actions in a script"""
+        """Execute all actions in a script with branching support"""
         script = self.scripts.get(script_name)
         if not script:
             logger.error(f"Script not found: {script_name}")
@@ -394,8 +444,12 @@ class ScriptRunner:
         
         logger.info(f"═══ SCRIPT START: {script_name} ({len(actions)} actions) ═══")
         
-        for i, action in enumerate(actions):
+        # Use index-based loop for branching support
+        i = 0
+        while i < len(actions):
+            action = actions[i]
             action_type = action.get('type', '?')
+            
             # Build action description
             if action_type == 'click':
                 desc = f"click({action.get('x')}, {action.get('y')})"
@@ -413,14 +467,54 @@ class ScriptRunner:
                 desc = f"call_command({action.get('command')})"
             elif action_type == 'check_process':
                 desc = f"check_process({action.get('process')})"
+            elif action_type == 'wait_for_pixel':
+                cond_count = len(action.get('conditions', []))
+                timeout = action.get('timeout', 30000)
+                desc = f"wait_for_pixel({cond_count} conditions, {timeout}ms)"
             else:
                 desc = str(action)[:40]
             
             logger.info(f"  [{i+1}/{len(actions)}] {desc}")
             
-            if not self.execute_action(action):
+            result = self.execute_action(action)
+            
+            # Handle branching results from wait_for_pixel
+            if isinstance(result, dict):
+                branch_action = result.get('action', 'continue')
+                
+                if branch_action == 'exit':
+                    logger.info(f"═══ SCRIPT EXIT: {script_name} (branch action) ═══")
+                    return True
+                elif branch_action == 'continue':
+                    i += 1
+                    continue
+                elif isinstance(branch_action, dict):
+                    if 'goto' in branch_action:
+                        goto_index = branch_action['goto']
+                        logger.info(f"  → GOTO action {goto_index + 1}")
+                        i = goto_index
+                        continue
+                    elif 'call' in branch_action:
+                        call_script = branch_action['call']
+                        logger.info(f"  → CALL script: {call_script}")
+                        self.execute_script(call_script)
+                        # After call, check if we should continue or exit
+                        if branch_action.get('exit', False):
+                            logger.info(f"═══ SCRIPT EXIT: {script_name} (after call) ═══")
+                            return True
+                        i += 1
+                        continue
+                else:
+                    # Unknown branch action, continue
+                    i += 1
+                    continue
+            
+            # Normal result handling
+            if not result:
                 logger.error(f"═══ SCRIPT FAILED: {script_name} at action {i+1} ═══")
                 return False
+            
+            i += 1
         
         logger.info(f"═══ SCRIPT DONE: {script_name} ═══")
         return True
