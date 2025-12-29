@@ -222,6 +222,9 @@ class ScriptRunner:
         self.default_cooldown = 60  # seconds between pixel triggers
         self.process_trigger_cooldown = 300  # 5 min for process triggers (game launch is slow)
         
+        # Current script context for pixel name resolution in wait_for_pixel
+        self._current_script_pixels = {}
+        
         # Load account config for variables
         self._load_account_config()
         
@@ -375,6 +378,10 @@ class ScriptRunner:
                 check_interval_ms = action.get('check_interval', 500)
                 on_timeout = action.get('on_timeout', 'exit')
                 
+                # Get pixels library from script's config via context
+                # (passed implicitly through the action's parent script)
+                pixels_library = self._current_script_pixels or {}
+                
                 logger.info(f"Waiting for pixel ({len(conditions)} conditions, timeout: {timeout_ms}ms)")
                 
                 start_time = time.time()
@@ -385,14 +392,26 @@ class ScriptRunner:
                     # Check each condition
                     for condition in conditions:
                         cond_name = condition.get('name', 'unnamed')
-                        pixels = condition.get('pixels', [])
                         
-                        if not pixels:
+                        # New format: pixel_names, Old format: pixels array
+                        pixel_names = condition.get('pixel_names', [])
+                        inline_pixels = condition.get('pixels', [])
+                        
+                        # Resolve pixel_names to actual pixel data
+                        if pixel_names:
+                            pixels_to_check = []
+                            for pn in pixel_names:
+                                if pn in pixels_library:
+                                    pixels_to_check.append(pixels_library[pn])
+                        else:
+                            pixels_to_check = inline_pixels
+                        
+                        if not pixels_to_check:
                             continue
                         
                         # AND logic: all pixels in condition must match
                         all_matched = True
-                        for px in pixels:
+                        for px in pixels_to_check:
                             x, y = px.get('x', 0), px.get('y', 0)
                             expected_color = px.get('color', '#FF0000')
                             tolerance = px.get('tolerance', 10)
@@ -441,6 +460,9 @@ class ScriptRunner:
         if not actions:
             logger.warning(f"Script {script_name} has no actions")
             return False
+        
+        # Set pixels library context for wait_for_pixel action
+        self._current_script_pixels = script.get('config', {}).get('pixels', {})
         
         logger.info(f"═══ SCRIPT START: {script_name} ({len(actions)} actions) ═══")
         
@@ -622,31 +644,39 @@ class ScriptRunner:
                     self.cooldown_until[name] = time.time() + cooldown
                     continue
             
-            # Check pixel groups (only if GTA5 is running for performance)
-            # New format: pixel_groups = [{name: 'group1', pixels: [...]}, ...]
-            # Logic: (group1 pixels AND) OR (group2 pixels AND) OR ...
-            pixel_groups = config.get('pixel_groups', [])
+            # Check trigger groups (use pixel_names references)
+            # New format: trigger_groups = [{name: 'group1', pixel_names: ['pixel1', 'pixel2']}, ...]
+            # Pixels library: pixels = {'pixel1': {x, y, color}, ...}
+            trigger_groups = config.get('trigger_groups', [])
+            pixels_library = config.get('pixels', {})
             
-            # Backward compatibility: convert old flat pixels to single group
-            if not pixel_groups and config.get('pixels'):
-                old_pixels = config['pixels']
-                pixel_groups = [{
-                    'name': 'legacy',
-                    'pixels': [{'x': p.get('x', 0), 'y': p.get('y', 0), 'color': p.get('color', '#FF0000')} 
-                               for p in old_pixels.values()]
-                }]
+            # Backward compatibility: convert old pixel_groups to trigger_groups
+            if not trigger_groups and config.get('pixel_groups'):
+                trigger_groups = config['pixel_groups']  # old format with inline pixels
             
-            if pixel_groups and is_process_running("GTA5.exe"):
-                for group in pixel_groups:
+            if trigger_groups and is_process_running("GTA5.exe"):
+                for group in trigger_groups:
                     group_name = group.get('name', 'group')
-                    pixels = group.get('pixels', [])
                     
-                    if not pixels:
+                    # New format uses pixel_names, old format uses pixels array
+                    pixel_names = group.get('pixel_names', [])
+                    inline_pixels = group.get('pixels', [])
+                    
+                    # Resolve pixel_names to actual pixel data
+                    if pixel_names:
+                        pixels_to_check = []
+                        for pn in pixel_names:
+                            if pn in pixels_library:
+                                pixels_to_check.append(pixels_library[pn])
+                    else:
+                        pixels_to_check = inline_pixels
+                    
+                    if not pixels_to_check:
                         continue
                     
                     # AND logic within group: ALL pixels in group must match
                     all_matched = True
-                    for px in pixels:
+                    for px in pixels_to_check:
                         x, y = px.get('x', 0), px.get('y', 0)
                         expected_color = px.get('color', '#FF0000')
                         tolerance = px.get('tolerance', 10)
@@ -661,7 +691,7 @@ class ScriptRunner:
                     # If all pixels in this group matched → trigger (OR between groups)
                     if all_matched:
                         cooldown = custom_cooldown if custom_cooldown else self.default_cooldown
-                        logger.info(f"Pixel group matched: {name}.{group_name} ({len(pixels)} pixels) (cooldown: {cooldown}s)")
+                        logger.info(f"Trigger group matched: {name}.{group_name} ({len(pixels_to_check)} pixels) (cooldown: {cooldown}s)")
                         triggered.append(name)
                         self.cooldown_until[name] = time.time() + cooldown
                         break  # Stop checking other groups
