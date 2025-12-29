@@ -201,6 +201,10 @@ class LogMonitor:
                 
                 if new_lines:
                     print(f"📝 Processing {len(new_lines)} lines...")
+                else:
+                    # Activity indicator (dot every 10 seconds of idle)
+                    if int(time.time()) % 10 == 0:
+                        print(".", end="", flush=True)
                 
                 for line in new_lines:
                     self.process_line(line)
@@ -218,16 +222,16 @@ def main():
         print("   Make sure you're running from the client directory")
         sys.exit(1)
     
-    # Аргументы командной строки
-    send_existing = "--new-only" not in sys.argv
+    # Аргументы командной строки (по умолчанию new-only)
+    send_existing = "--all" in sys.argv
     
     print("=" * 50)
     print("  VirtBot Log Monitor")
     print("=" * 50)
     print()
     print("Usage:")
-    print("  python log_monitor.py           # Send all existing + new logs")
-    print("  python log_monitor.py --new-only # Only new logs")
+    print("  python log_monitor.py         # Only NEW logs (default)")
+    print("  python log_monitor.py --all   # Send all existing + new logs")
     print()
     
     monitor = LogMonitor(send_existing=send_existing)
