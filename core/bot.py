@@ -37,6 +37,10 @@ class VirtBot:
             "start_scripts": self._cmd_start_scripts,
             "stop_scripts": self._cmd_stop_scripts,
             "start_debug": self._cmd_start_debug,
+            # System commands (for startup scripts)
+            "sync_time": self._cmd_sync_time,
+            "update_gta_settings": self._cmd_update_gta_settings,
+            "fetch_config": self._cmd_fetch_config,
         }
         
         # ScriptRunner for automation
@@ -83,48 +87,12 @@ class VirtBot:
         """Запуск скриптов инициализации"""
         self.logger.info("")
         self.logger.info("=" * 50)
-        self.logger.info("🔧 Running startup scripts...")
+        self.logger.info("🔧 Running startup...")
         self.logger.info("=" * 50)
         
-        # 1. Синхронизация времени
+        # 1. Sync scripts from server (HARDCODED - always runs to get latest scripts)
         try:
-            from scripts.set_local_time import sync_time
-            self.logger.info("📍 Step 1: Time sync")
-            if sync_time():
-                self.logger.info("✅ Time synced")
-            else:
-                self.logger.warning("⚠️  Time sync failed (continuing)")
-        except Exception as e:
-            self.logger.error(f"Time sync error: {e}")
-        
-        # 2. Настройки GTA
-        try:
-            from scripts.update_gta_settings import update_gta_settings
-            self.logger.info("📍 Step 2: GTA settings")
-            if update_gta_settings():
-                self.logger.info("✅ GTA settings updated")
-            else:
-                self.logger.warning("⚠️  GTA settings failed (continuing)")
-        except Exception as e:
-            self.logger.error(f"GTA settings error: {e}")
-        
-        # 3. Получение конфига аккаунта
-        try:
-            from scripts.get_config import fetch_config
-            self.logger.info("📍 Step 3: Fetch account config")
-            if fetch_config():
-                self.logger.info("✅ Account config fetched")
-            else:
-                self.logger.warning("⚠️  Config fetch failed (continuing)")
-        except Exception as e:
-            self.logger.error(f"Config fetch error: {e}")
-        
-        # Note: Server connection через реестр Windows при вызове join_server
-        # Больше не нужно обновлять storage.json при старте
-        
-        # 4. Sync scripts from server
-        try:
-            self.logger.info("📍 Step 4: Sync automation scripts")
+            self.logger.info("📍 Step 1: Sync automation scripts")
             if self.script_runner.sync_from_server():
                 self.logger.info("✅ Scripts synced from server")
             else:
@@ -132,17 +100,18 @@ class VirtBot:
         except Exception as e:
             self.logger.error(f"Scripts sync error: {e}")
         
-        # 5. Run startup scripts (run_on_startup: true)
+        # 2. Run startup scripts (run_on_startup: true)
+        # These scripts can call commands: sync_time, update_gta_settings, fetch_config
         try:
-            self.logger.info("📍 Step 5: Running startup scripts (run_on_startup)")
+            self.logger.info("📍 Step 2: Running startup scripts (run_on_startup)")
             self.script_runner.run_startup_scripts()
             self.logger.info("✅ Startup scripts executed")
         except Exception as e:
             self.logger.error(f"Startup scripts error: {e}")
         
-        # 6. Start trigger scanner
+        # 3. Start trigger scanner
         try:
-            self.logger.info("📍 Step 6: Starting script trigger scanner")
+            self.logger.info("📍 Step 3: Starting script trigger scanner")
             self.script_runner.start()
             self.logger.info("✅ Script trigger scanner started")
         except Exception as e:
@@ -150,7 +119,7 @@ class VirtBot:
         
         self.logger.info("")
         self.logger.info("=" * 50)
-        self.logger.info("✅ Startup scripts completed!")
+        self.logger.info("✅ Startup completed!")
         self.logger.info("=" * 50)
         self.logger.info("")
     
@@ -368,6 +337,51 @@ class VirtBot:
             return "LogMonitor started (log_monitor.py)"
         except Exception as e:
             self.logger.error(f"Failed to start LogMonitor: {e}")
+            return f"Error: {e}"
+    
+    async def _cmd_sync_time(self, params: Dict) -> str:
+        """Синхронизация системного времени"""
+        try:
+            from scripts.set_local_time import sync_time
+            self.logger.info("⏱️ Syncing system time...")
+            if sync_time():
+                self.logger.info("✅ Time synced successfully")
+                return "Time synced"
+            else:
+                self.logger.warning("⚠️ Time sync failed")
+                return "Time sync failed"
+        except Exception as e:
+            self.logger.error(f"Time sync error: {e}")
+            return f"Error: {e}"
+    
+    async def _cmd_update_gta_settings(self, params: Dict) -> str:
+        """Обновить настройки GTA5"""
+        try:
+            from scripts.update_gta_settings import update_gta_settings
+            self.logger.info("🎮 Updating GTA settings...")
+            if update_gta_settings():
+                self.logger.info("✅ GTA settings updated")
+                return "GTA settings updated"
+            else:
+                self.logger.warning("⚠️ GTA settings update failed")
+                return "GTA settings update failed"
+        except Exception as e:
+            self.logger.error(f"GTA settings error: {e}")
+            return f"Error: {e}"
+    
+    async def _cmd_fetch_config(self, params: Dict) -> str:
+        """Получить конфиг аккаунта с сервера"""
+        try:
+            from scripts.get_config import fetch_config
+            self.logger.info("📥 Fetching account config...")
+            if fetch_config():
+                self.logger.info("✅ Account config fetched")
+                return "Config fetched"
+            else:
+                self.logger.warning("⚠️ Config fetch failed")
+                return "Config fetch failed"
+        except Exception as e:
+            self.logger.error(f"Config fetch error: {e}")
             return f"Error: {e}"
     
     def stop(self):
