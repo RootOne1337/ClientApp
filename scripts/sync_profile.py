@@ -33,7 +33,7 @@ SERVER_NAMES = {
     9: "09.Eclipse", 10: "10.LaMesa", 11: "11.Burton", 12: "12.Rockford",
     13: "13.Alta", 14: "14.DelPerro", 15: "15.Davis", 16: "16.Harmony",
     17: "17.Redwood", 18: "18.Hawick", 19: "19.Grapeseed", 20: "20.Murrieta",
-    21: "21.Vespucci", 22: "22.Milton"
+    21: "21.Vespucci", 22: "22.Milton", 23: "23.LaPuerta"
 }
 
 
