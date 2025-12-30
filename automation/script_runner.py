@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# INPUT HELPERS (Windows API)
+# INPUT HELPERS (Windows API with Hardware Scan Code support)
 # ============================================================================
 
 # Virtual key codes
@@ -38,6 +38,8 @@ VK_CODES = {
     'F6': 0x75, 'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79,
     'F11': 0x7A, 'F12': 0x7B,
     'SHIFT': 0x10, 'CTRL': 0x11, 'ALT': 0x12,
+    'LSHIFT': 0xA0, 'RSHIFT': 0xA1, 'LCTRL': 0xA2, 'RCTRL': 0xA3,
+    'LALT': 0xA4, 'RALT': 0xA5,
     '0': 0x30, '1': 0x31, '2': 0x32, '3': 0x33, '4': 0x34,
     '5': 0x35, '6': 0x36, '7': 0x37, '8': 0x38, '9': 0x39,
     'A': 0x41, 'B': 0x42, 'C': 0x43, 'D': 0x44, 'E': 0x45,
@@ -46,6 +48,82 @@ VK_CODES = {
     'P': 0x50, 'Q': 0x51, 'R': 0x52, 'S': 0x53, 'T': 0x54,
     'U': 0x55, 'V': 0x56, 'W': 0x57, 'X': 0x58, 'Y': 0x59, 'Z': 0x5A,
 }
+
+# Hardware scan codes (for DirectInput/Raw Input compatibility)
+# These are used by games like GTA5 that read input at hardware level
+SCAN_CODES = {
+    'ESC': 0x01, 'TAB': 0x0F, 'ENTER': 0x1C, 'SPACE': 0x39,
+    'BACKSPACE': 0x0E, 'DELETE': 0x53, 'INSERT': 0x52,
+    'UP': 0x48, 'DOWN': 0x50, 'LEFT': 0x4B, 'RIGHT': 0x4D,
+    'HOME': 0x47, 'END': 0x4F, 'PAGEUP': 0x49, 'PAGEDOWN': 0x51,
+    'F1': 0x3B, 'F2': 0x3C, 'F3': 0x3D, 'F4': 0x3E, 'F5': 0x3F,
+    'F6': 0x40, 'F7': 0x41, 'F8': 0x42, 'F9': 0x43, 'F10': 0x44,
+    'F11': 0x57, 'F12': 0x58,
+    'SHIFT': 0x2A, 'LSHIFT': 0x2A, 'RSHIFT': 0x36,
+    'CTRL': 0x1D, 'LCTRL': 0x1D, 'RCTRL': 0x1D,
+    'ALT': 0x38, 'LALT': 0x38, 'RALT': 0x38,
+    '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
+    '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A, '0': 0x0B,
+    'Q': 0x10, 'W': 0x11, 'E': 0x12, 'R': 0x13, 'T': 0x14,
+    'Y': 0x15, 'U': 0x16, 'I': 0x17, 'O': 0x18, 'P': 0x19,
+    'A': 0x1E, 'S': 0x1F, 'D': 0x20, 'F': 0x21, 'G': 0x22,
+    'H': 0x23, 'J': 0x24, 'K': 0x25, 'L': 0x26,
+    'Z': 0x2C, 'X': 0x2D, 'C': 0x2E, 'V': 0x2F, 'B': 0x30,
+    'N': 0x31, 'M': 0x32,
+    '-': 0x0C, '=': 0x0D, '[': 0x1A, ']': 0x1B, '\\': 0x2B,
+    ';': 0x27, "'": 0x28, '`': 0x29, ',': 0x33, '.': 0x34, '/': 0x35,
+}
+
+# SendInput constants
+INPUT_KEYBOARD = 1
+KEYEVENTF_SCANCODE = 0x0008  # Use hardware scan code
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_EXTENDEDKEY = 0x0001  # For arrow keys, numpad, etc.
+
+# Extended keys that need KEYEVENTF_EXTENDEDKEY flag
+EXTENDED_KEYS = {'UP', 'DOWN', 'LEFT', 'RIGHT', 'HOME', 'END', 'PAGEUP', 'PAGEDOWN', 
+                 'INSERT', 'DELETE', 'RCTRL', 'RALT', 'NUMLOCK', 'BREAK', 'PRTSC'}
+
+# Input mode: 'hardware' (scan codes, for games) or 'virtual' (VK codes, for apps)
+_input_mode = 'hardware'
+
+
+def set_input_mode(mode: str):
+    """Set input mode: 'hardware' (scan codes) or 'virtual' (VK codes)
+    
+    Hardware mode works with games that use DirectInput/Raw Input (like GTA5).
+    Virtual mode works better with some applications.
+    """
+    global _input_mode
+    if mode in ('hardware', 'virtual'):
+        _input_mode = mode
+        logger.info(f"Input mode set to: {mode}")
+    else:
+        logger.warning(f"Unknown input mode: {mode}, using 'hardware'")
+        _input_mode = 'hardware'
+
+
+def get_input_mode() -> str:
+    """Get current input mode"""
+    return _input_mode
+
+
+def _get_scan_code(key: str) -> int:
+    """Get hardware scan code for a key"""
+    key = key.upper()
+    if key in SCAN_CODES:
+        return SCAN_CODES[key]
+    # Fallback: use MapVirtualKey to convert VK to scan code
+    vk = VK_CODES.get(key, ord(key[0]) if key else 0)
+    return ctypes.windll.user32.MapVirtualKeyW(vk, 0)
+
+
+def _send_key_event(vk: int, scan: int, flags: int):
+    """Send a keyboard event using keybd_event with scan code support"""
+    # keybd_event(bVk, bScan, dwFlags, dwExtraInfo)
+    # When using scan codes, we still pass VK for compatibility
+    # but the scan code makes it work with DirectInput
+    ctypes.windll.user32.keybd_event(vk, scan, flags, 0)
 
 
 def click(x: int, y: int, delay_ms: int = 50):
@@ -58,8 +136,12 @@ def click(x: int, y: int, delay_ms: int = 50):
 
 
 def press_key(key: str):
-    """Press and release a key or key combo (e.g., CTRL+A, ALT+TAB)"""
+    """Press and release a key or key combo (e.g., CTRL+A, ALT+TAB)
+    
+    Uses hardware scan codes in 'hardware' mode for game compatibility.
+    """
     key = key.upper()
+    use_hardware = (_input_mode == 'hardware')
     
     # Check for key combo
     if '+' in key:
@@ -69,50 +151,83 @@ def press_key(key: str):
         
         for mod in parts[:-1]:
             if mod in VK_CODES:
-                modifiers.append(VK_CODES[mod])
+                vk = VK_CODES[mod]
+                scan = SCAN_CODES.get(mod, 0) if use_hardware else 0
+                modifiers.append((vk, scan, mod))
         
         # Press modifiers
-        for vk in modifiers:
-            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        for vk, scan, name in modifiers:
+            flags = KEYEVENTF_EXTENDEDKEY if name in EXTENDED_KEYS else 0
+            if use_hardware and scan:
+                flags |= KEYEVENTF_SCANCODE
+            _send_key_event(vk, scan, flags)
         time.sleep(0.02)
         
         # Press main key
         main_vk = VK_CODES.get(main_key, ord(main_key[0]) if main_key else 0)
-        ctypes.windll.user32.keybd_event(main_vk, 0, 0, 0)
+        main_scan = SCAN_CODES.get(main_key, 0) if use_hardware else 0
+        flags = KEYEVENTF_EXTENDEDKEY if main_key in EXTENDED_KEYS else 0
+        if use_hardware and main_scan:
+            flags |= KEYEVENTF_SCANCODE
+        
+        _send_key_event(main_vk, main_scan, flags)
         time.sleep(0.05)
-        ctypes.windll.user32.keybd_event(main_vk, 0, 2, 0)  # KEYUP
+        _send_key_event(main_vk, main_scan, flags | KEYEVENTF_KEYUP)
         
         # Release modifiers (reverse order)
         time.sleep(0.02)
-        for vk in reversed(modifiers):
-            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYUP
+        for vk, scan, name in reversed(modifiers):
+            flags = KEYEVENTF_KEYUP
+            if name in EXTENDED_KEYS:
+                flags |= KEYEVENTF_EXTENDEDKEY
+            if use_hardware and scan:
+                flags |= KEYEVENTF_SCANCODE
+            _send_key_event(vk, scan, flags)
     else:
         # Single key
         vk = VK_CODES.get(key, ord(key[0]) if key else 0)
-        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        scan = SCAN_CODES.get(key, 0) if use_hardware else 0
+        flags = KEYEVENTF_EXTENDEDKEY if key in EXTENDED_KEYS else 0
+        if use_hardware and scan:
+            flags |= KEYEVENTF_SCANCODE
+        
+        _send_key_event(vk, scan, flags)
         time.sleep(0.05)
-        ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYUP
+        _send_key_event(vk, scan, flags | KEYEVENTF_KEYUP)
 
 
 def type_text(text: str, delay_ms: int = 30):
-    """Type text character by character"""
+    """Type text character by character
+    
+    Uses hardware scan codes in 'hardware' mode for game compatibility.
+    """
+    use_hardware = (_input_mode == 'hardware')
+    
     for char in text:
-        # Use SendInput for Unicode support
         if char.isalnum() or char in ' !@#$%^&*()_+-=[]{}|;:\'",.<>?/\\`~':
-            vk = VK_CODES.get(char.upper(), ord(char.upper()))
+            key = char.upper()
+            vk = VK_CODES.get(key, ord(key))
+            scan = SCAN_CODES.get(key, 0) if use_hardware else 0
             
             # Check if shift needed
             needs_shift = char.isupper() or char in '!@#$%^&*()_+{}|:"<>?~'
             
             if needs_shift:
-                ctypes.windll.user32.keybd_event(0x10, 0, 0, 0)  # SHIFT down
+                shift_scan = SCAN_CODES.get('SHIFT', 0x2A) if use_hardware else 0
+                flags = KEYEVENTF_SCANCODE if use_hardware and shift_scan else 0
+                _send_key_event(0x10, shift_scan, flags)
             
-            ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+            flags = KEYEVENTF_SCANCODE if use_hardware and scan else 0
+            _send_key_event(vk, scan, flags)
             time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+            _send_key_event(vk, scan, flags | KEYEVENTF_KEYUP)
             
             if needs_shift:
-                ctypes.windll.user32.keybd_event(0x10, 0, 2, 0)  # SHIFT up
+                shift_scan = SCAN_CODES.get('SHIFT', 0x2A) if use_hardware else 0
+                flags = KEYEVENTF_KEYUP
+                if use_hardware and shift_scan:
+                    flags |= KEYEVENTF_SCANCODE
+                _send_key_event(0x10, shift_scan, flags)
         
         time.sleep(delay_ms / 1000)
 
