@@ -513,55 +513,115 @@ class VirtBot:
             except:
                 return False
         
-        def kill_process(proc_name: str, force: bool = True) -> bool:
-            """Убить процесс, возвращает True если успешно"""
+        def kill_process_taskkill(proc_name: str) -> bool:
+            """Убить через taskkill /F"""
             try:
-                cmd = ["taskkill", "/IM", proc_name, "/T"]
-                if force:
-                    cmd.insert(1, "/F")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                result = subprocess.run(
+                    ["taskkill", "/F", "/IM", proc_name, "/T"],
+                    capture_output=True, text=True, timeout=5
+                )
                 return result.returncode == 0
             except:
                 return False
         
+        def kill_process_wmic(proc_name: str) -> bool:
+            """Убить через wmic (альтернативный метод)"""
+            try:
+                result = subprocess.run(
+                    ["wmic", "process", "where", f"name='{proc_name}'", "delete"],
+                    capture_output=True, text=True, timeout=10
+                )
+                return "deleted" in result.stdout.lower() or result.returncode == 0
+            except:
+                return False
+        
+        def kill_process_powershell(proc_name: str) -> bool:
+            """Убить через PowerShell (самый агрессивный метод)"""
+            try:
+                # Убираем .exe для Get-Process
+                name_no_ext = proc_name.replace('.exe', '').replace('.EXE', '')
+                cmd = f"Get-Process -Name '{name_no_ext}' -ErrorAction SilentlyContinue | Stop-Process -Force"
+                result = subprocess.run(
+                    ["powershell", "-Command", cmd],
+                    capture_output=True, text=True, timeout=10
+                )
+                return True  # PowerShell не возвращает ошибку если процесса нет
+            except:
+                return False
+        
+        def aggressive_kill(proc_name: str) -> bool:
+            """Пробует все методы убийства процесса"""
+            # Метод 1: taskkill
+            if kill_process_taskkill(proc_name):
+                return True
+            
+            # Метод 2: wmic  
+            if kill_process_wmic(proc_name):
+                return True
+            
+            # Метод 3: PowerShell
+            if kill_process_powershell(proc_name):
+                return True
+            
+            return False
+        
         killed = []
         
-        # Первый проход - пытаемся убить все процессы
-        self.logger.info("📍 Pass 1: Killing processes...")
+        # Первый проход - пытаемся убить все процессы через taskkill
+        self.logger.info("📍 Pass 1: Killing processes (taskkill)...")
         for proc in processes_to_kill:
-            if kill_process(proc, force=True):
+            if kill_process_taskkill(proc):
                 killed.append(proc)
                 self.logger.info(f"  ✅ Killed: {proc}")
         
         # Ждём немного
         time.sleep(1)
         
-        # Второй проход - проверяем и добиваем оставшиеся
-        self.logger.info("📍 Pass 2: Verifying and force killing remaining...")
-        still_running = []
-        for proc in processes_to_kill:
-            if is_process_running(proc):
-                still_running.append(proc)
-                self.logger.warning(f"  ⚠️ Still running: {proc}, force killing...")
-                if kill_process(proc, force=True):
-                    killed.append(f"{proc}(retry)")
-                    self.logger.info(f"  ✅ Force killed: {proc}")
-                else:
-                    self.logger.error(f"  ❌ Failed to kill: {proc}")
+        # Второй проход - проверяем и добиваем через wmic
+        still_running = [p for p in processes_to_kill if is_process_running(p)]
+        if still_running:
+            self.logger.info("📍 Pass 2: Killing remaining via wmic...")
+            for proc in still_running:
+                self.logger.warning(f"  ⚠️ Still running: {proc}")
+                if kill_process_wmic(proc):
+                    killed.append(f"{proc}(wmic)")
+                    self.logger.info(f"  ✅ Killed via wmic: {proc}")
         
-        # Третий проход - последняя проверка
+        time.sleep(0.5)
+        
+        # Третий проход - PowerShell для самых упрямых
+        still_running = [p for p in processes_to_kill if is_process_running(p)]
+        if still_running:
+            self.logger.info("📍 Pass 3: Killing remaining via PowerShell...")
+            for proc in still_running:
+                self.logger.warning(f"  ⚠️ Still alive: {proc}, using PowerShell...")
+                kill_process_powershell(proc)
+                time.sleep(0.3)
+                if not is_process_running(proc):
+                    killed.append(f"{proc}(ps)")
+                    self.logger.info(f"  ✅ Killed via PowerShell: {proc}")
+                else:
+                    self.logger.error(f"  ❌ Could not kill: {proc}")
+        
+        # Финальная проверка
         time.sleep(0.5)
         final_remaining = [p for p in processes_to_kill if is_process_running(p)]
         if final_remaining:
-            self.logger.warning(f"⚠️ Could not kill: {', '.join(final_remaining)}")
+            self.logger.warning(f"⚠️ Survivors: {', '.join(final_remaining)}")
         
         # Сбросить статус на online
         self.status = "online"
         self.current_server = None
         
-        if killed:
-            self.logger.info(f"✅ Closed {len(killed)} processes")
-            return f"Closed: {', '.join(set(p.replace('(retry)', '') for p in killed))}"
+        # Убираем дубликаты из списка
+        unique_killed = set()
+        for p in killed:
+            clean_name = p.replace('(wmic)', '').replace('(ps)', '')
+            unique_killed.add(clean_name)
+        
+        if unique_killed:
+            self.logger.info(f"✅ Closed {len(unique_killed)} processes")
+            return f"Closed: {', '.join(unique_killed)}"
         else:
             self.logger.info("ℹ️ No game processes were running")
             return "No game processes found"
