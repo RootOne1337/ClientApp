@@ -480,6 +480,7 @@ class VirtBot:
     async def _cmd_close_game(self, params: Dict) -> str:
         """Команда: закрыть игру и все связанные процессы"""
         import subprocess
+        import time
         
         self.logger.info("🎮 Closing game and related processes...")
         
@@ -499,35 +500,68 @@ class VirtBot:
             "SocialClubHelper.exe",            # Social Club
         ]
         
-        killed = []
-        failed = []
-        
-        for proc in processes_to_kill:
+        def is_process_running(proc_name: str) -> bool:
+            """Проверяет, запущен ли процесс"""
             try:
-                # taskkill /F /IM process.exe /T (force kill with tree)
                 result = subprocess.run(
-                    ["taskkill", "/F", "/IM", proc, "/T"],
+                    ["tasklist", "/FI", f"IMAGENAME eq {proc_name}"],
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
-                if result.returncode == 0:
-                    killed.append(proc)
-                    self.logger.info(f"  ✅ Killed: {proc}")
-                # returncode 128 = process not found (not an error)
-            except subprocess.TimeoutExpired:
-                failed.append(proc)
-                self.logger.warning(f"  ⚠️ Timeout killing: {proc}")
-            except Exception as e:
-                self.logger.debug(f"  Error killing {proc}: {e}")
+                return proc_name.lower() in result.stdout.lower()
+            except:
+                return False
+        
+        def kill_process(proc_name: str, force: bool = True) -> bool:
+            """Убить процесс, возвращает True если успешно"""
+            try:
+                cmd = ["taskkill", "/IM", proc_name, "/T"]
+                if force:
+                    cmd.insert(1, "/F")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                return result.returncode == 0
+            except:
+                return False
+        
+        killed = []
+        
+        # Первый проход - пытаемся убить все процессы
+        self.logger.info("📍 Pass 1: Killing processes...")
+        for proc in processes_to_kill:
+            if kill_process(proc, force=True):
+                killed.append(proc)
+                self.logger.info(f"  ✅ Killed: {proc}")
+        
+        # Ждём немного
+        time.sleep(1)
+        
+        # Второй проход - проверяем и добиваем оставшиеся
+        self.logger.info("📍 Pass 2: Verifying and force killing remaining...")
+        still_running = []
+        for proc in processes_to_kill:
+            if is_process_running(proc):
+                still_running.append(proc)
+                self.logger.warning(f"  ⚠️ Still running: {proc}, force killing...")
+                if kill_process(proc, force=True):
+                    killed.append(f"{proc}(retry)")
+                    self.logger.info(f"  ✅ Force killed: {proc}")
+                else:
+                    self.logger.error(f"  ❌ Failed to kill: {proc}")
+        
+        # Третий проход - последняя проверка
+        time.sleep(0.5)
+        final_remaining = [p for p in processes_to_kill if is_process_running(p)]
+        if final_remaining:
+            self.logger.warning(f"⚠️ Could not kill: {', '.join(final_remaining)}")
         
         # Сбросить статус на online
         self.status = "online"
         self.current_server = None
         
         if killed:
-            self.logger.info(f"✅ Closed {len(killed)} processes: {', '.join(killed)}")
-            return f"Closed: {', '.join(killed)}"
+            self.logger.info(f"✅ Closed {len(killed)} processes")
+            return f"Closed: {', '.join(set(p.replace('(retry)', '') for p in killed))}"
         else:
             self.logger.info("ℹ️ No game processes were running")
             return "No game processes found"
