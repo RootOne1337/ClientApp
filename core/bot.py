@@ -42,6 +42,7 @@ class VirtBot:
             "update_gta_settings": self._cmd_update_gta_settings,
             "fetch_config": self._cmd_fetch_config,
             "sync_profile": self._cmd_sync_profile,
+            "close_game": self._cmd_close_game,
         }
         
         # ScriptRunner for automation
@@ -475,6 +476,61 @@ class VirtBot:
         except Exception as e:
             self.logger.error(f"Profile sync error: {e}")
             return f"Error: {e}"
+    
+    async def _cmd_close_game(self, params: Dict) -> str:
+        """Команда: закрыть игру и все связанные процессы"""
+        import subprocess
+        
+        self.logger.info("🎮 Closing game and related processes...")
+        
+        # Список процессов для завершения
+        processes_to_kill = [
+            "GTA5.exe",        # GTA 5
+            "PlayGTAV.exe",    # GTA 5 Launcher
+            "ragemp_v.exe",    # RageMP
+            "ragemp.exe",      # RageMP Launcher
+            "rage_bootstrapper_launcher.exe",  # RageMP Bootstrapper
+            "EpicGamesLauncher.exe",           # Epic Games
+            "EpicWebHelper.exe",               # Epic Web Helper
+            "RockstarErrorHandler.exe",        # Rockstar Error Handler
+            "Rockstar-Launcher-Bootstrapper.exe",  # Rockstar Bootstrapper
+            "RockstarService.exe",             # Rockstar Service  
+            "Launcher.exe",                    # Generic launcher
+            "SocialClubHelper.exe",            # Social Club
+        ]
+        
+        killed = []
+        failed = []
+        
+        for proc in processes_to_kill:
+            try:
+                # taskkill /F /IM process.exe /T (force kill with tree)
+                result = subprocess.run(
+                    ["taskkill", "/F", "/IM", proc, "/T"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    killed.append(proc)
+                    self.logger.info(f"  ✅ Killed: {proc}")
+                # returncode 128 = process not found (not an error)
+            except subprocess.TimeoutExpired:
+                failed.append(proc)
+                self.logger.warning(f"  ⚠️ Timeout killing: {proc}")
+            except Exception as e:
+                self.logger.debug(f"  Error killing {proc}: {e}")
+        
+        # Сбросить статус на online
+        self.status = "online"
+        self.current_server = None
+        
+        if killed:
+            self.logger.info(f"✅ Closed {len(killed)} processes: {', '.join(killed)}")
+            return f"Closed: {', '.join(killed)}"
+        else:
+            self.logger.info("ℹ️ No game processes were running")
+            return "No game processes found"
     
     def stop(self):
         """Остановить бота"""
