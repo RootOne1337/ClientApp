@@ -167,6 +167,28 @@ class VirtBot:
         
         self.logger.info(f"📨 Received command: {command}")
         
+        # NEW: Check if script exists with this command name
+        # Scripts without triggers = manual commands that can override built-in handlers
+        if self.script_runner and command in self.script_runner.scripts:
+            script = self.script_runner.scripts[command]
+            config = script.get('config', {})
+            
+            # Only use script if it has no automatic triggers (otherwise it's an automation script, not a command)
+            has_triggers = bool(config.get('trigger_groups') or config.get('process_triggers'))
+            
+            if not has_triggers:
+                try:
+                    self.logger.info(f"🎬 Executing script-based command: '{command}'")
+                    success = self.script_runner.execute_script(command)
+                    result = "OK" if success else "Script execution failed"
+                    await self.api.complete_command(cmd_id, result)
+                    self.logger.info(f"✅ Command completed via script: {command}")
+                    return
+                except Exception as e:
+                    self.logger.warning(f"Script execution error, falling back to handler: {e}")
+                    # Fall through to hardcoded handler
+        
+        # Existing: Try hardcoded handler
         handler = self.command_handlers.get(command)
         if handler:
             try:
