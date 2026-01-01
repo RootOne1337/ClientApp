@@ -2,6 +2,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from logging.handlers import TimedRotatingFileHandler
 from config import LOGS_DIR
 
 # Формат логов
@@ -26,10 +27,21 @@ def setup_logger(name: str = "virtbot") -> logging.Logger:
     console_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
     root_logger.addHandler(console_handler)
     
-    # Файловый handler (DEBUG и выше)
-    log_file = LOGS_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.INFO)  # Changed to INFO for cleaner logs
+    # Файловый handler с автоматической ротацией (INFO и выше)
+    # Ротация происходит в полночь, хранятся файлы за последние 30 дней
+    base_log_file = LOGS_DIR / "bot.log"
+    file_handler = TimedRotatingFileHandler(
+        filename=str(base_log_file),
+        when='midnight',        # Ротация в полночь
+        interval=1,             # Каждый день
+        backupCount=30,         # Хранить 30 дней
+        encoding='utf-8',
+        utc=False               # Использовать локальное время
+    )
+    
+    # Формат имени для ротированных файлов: bot.log.2026-01-01
+    file_handler.suffix = "%Y-%m-%d"
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
     root_logger.addHandler(file_handler)
     

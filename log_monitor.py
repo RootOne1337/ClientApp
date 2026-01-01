@@ -33,6 +33,8 @@ class LogMonitor:
         self.last_position = 0
         self.last_lines = []  # Последние N строк для контекста
         self.current_log_file = None
+        self.current_file_inode = None  # Track file identity for rotation detection
+        self.current_file_size = 0       # Track file size
         self.send_existing = send_existing
         self.sent_count = 0
         
@@ -44,8 +46,9 @@ class LogMonitor:
         print("-" * 50)
     
     def get_today_log_file(self) -> Path:
-        """Получить путь к сегодняшнему логу"""
-        return LOGS_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.log"
+        """Получить путь к текущему логу"""
+        # Используем bot.log (текущий активный файл после внедрения TimedRotatingFileHandler)
+        return LOGS_DIR / "bot.log"
     
     def read_file_lines(self, filepath: Path, from_position: int = 0) -> list:
         """Прочитать строки из файла начиная с позиции"""
@@ -171,6 +174,34 @@ class LogMonitor:
         elif level in SEND_LEVELS:
             self.send_to_server(level, parsed["message"])
     
+    def file_identity_changed(self, filepath: Path) -> bool:
+        """Проверить, был ли файл ротирован или пересоздан"""
+        if not filepath.exists():
+            return False
+        
+        try:
+            stat = filepath.stat()
+            current_inode = stat.st_ino
+            current_size = stat.st_size
+            
+            # Файл был ротирован если inode изменился или размер уменьшился
+            changed = (
+                self.current_file_inode is not None and
+                (current_inode != self.current_file_inode or 
+                 current_size < self.current_file_size)
+            )
+            
+            self.current_file_inode = current_inode
+            self.current_file_size = current_size
+            
+            if changed:
+                print(f"🔄 File rotation detected: inode or size changed")
+            
+            return changed
+        except Exception as e:
+            print(f"⚠️ Error checking file identity: {e}")
+            return False
+    
     def monitor(self, interval: float = 1.0):
         """Главный цикл мониторинга"""
         print(f"\n👀 Monitoring logs (interval: {interval}s)...")
@@ -180,21 +211,36 @@ class LogMonitor:
             while True:
                 log_file = self.get_today_log_file()
                 
-                # Проверяем смену дня или первый запуск
+                # Проверяем ротацию файла по inode/size
+                if self.file_identity_changed(log_file):
+                    print(f"🔄 Log file was rotated, starting from beginning")
+                    self.last_position = 0
+                
+                # Проверяем смену файла или первый запуск
                 if log_file != self.current_log_file:
                     self.current_log_file = log_file
                     
-                    if self.send_existing:
-                        # Читаем ВСЕ существующие логи
-                        self.last_position = 0
-                        print(f"📁 Reading existing logs from: {log_file}")
-                    else:
-                        # Начинаем с конца файла
-                        if log_file.exists():
-                            self.last_position = log_file.stat().st_size
-                        else:
+                    if log_file.exists():
+                        if self.send_existing:
+                            # Читаем ВСЕ существующие логи
                             self.last_position = 0
-                        print(f"📁 Watching (new only): {log_file}")
+                            print(f"📁 Reading existing logs from: {log_file}")
+                        else:
+                            # Начинаем с конца файла
+                            self.last_position = log_file.stat().st_size
+                            print(f"📁 Watching (new only): {log_file}")
+                    else:
+                        # Файл еще не существует
+                        self.last_position = 0
+                        print(f"📁 Waiting for log file: {log_file}")
+                
+                # Валидация позиции перед чтением
+                if log_file.exists():
+                    file_size = log_file.stat().st_size
+                    if self.last_position > file_size:
+                        # Позиция за концом файла - файл был обрезан/ротирован
+                        print(f"⚠️ Position reset: {self.last_position} > {file_size}")
+                        self.last_position = 0
                 
                 # Читаем новые строки
                 new_lines = self.read_file_lines(log_file, self.last_position)
