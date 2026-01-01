@@ -211,7 +211,7 @@ class VirtBot:
     
     def _restore_state_on_startup(self):
         """Restore game state if GTA5 is already running"""
-        from game.processes import is_process_running
+        from game.launcher import is_process_running
         
         if not is_process_running("GTA5.exe"):
             self.logger.debug("GTA5 not running - no state to restore")
@@ -292,7 +292,7 @@ class VirtBot:
         while self.running:
             try:
                 # Only sync if game is running
-                from game.processes import is_process_running
+                from game.launcher import is_process_running
                 
                 if is_process_running("GTA5.exe"):
                     await self._sync_and_validate_status()
