@@ -12,6 +12,7 @@ Log Monitor — отдельный демон для мониторинга ло
 import os
 import sys
 import time
+import platform
 import httpx
 from pathlib import Path
 from datetime import datetime
@@ -29,7 +30,7 @@ class LogMonitor:
     
     def __init__(self, send_existing: bool = True):
         self.api_url = settings.API_URL
-        self.pc_name = os.environ.get("COMPUTERNAME", os.environ.get("HOSTNAME", "unknown"))
+        self.pc_name = platform.node()  # Use platform.node() instead of COMPUTERNAME for full name
         self.last_position = 0
         self.last_lines = []  # Последние N строк для контекста
         self.current_log_file = None

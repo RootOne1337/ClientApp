@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+import platform
 from datetime import datetime
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
@@ -8,8 +9,10 @@ from config import LOGS_DIR
 
 # Get machine name for logs
 def get_machine_name() -> str:
-    """Get machine name for logging (uses COMPUTERNAME from Windows)"""
-    return os.environ.get("COMPUTERNAME", os.environ.get("HOSTNAME", "Unknown"))
+    """Get machine name for logging (uses platform.node() for full name)"""
+    # platform.node() returns full computer name (e.g. DESKTOP-IOPA6D8T1)
+    # COMPUTERNAME can be truncated (e.g. DESKTOP-IOPA6D8)
+    return platform.node()
 
 MACHINE_NAME = get_machine_name()
 
