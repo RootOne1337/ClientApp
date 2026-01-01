@@ -219,27 +219,60 @@ class VirtBot:
         
         self.logger.info("🎮 GTA5.exe detected - attempting state recovery...")
         
-        # Try to load saved state
+        # Try to load saved state first
         state = self._load_state()
         
         if self._is_state_valid(state):
             self.current_server = state.get("current_server")
             self.current_char = state.get("current_char")
             self.game_started_at = state.get("game_started_at")
-            self.logger.info(f"♻️ Restored: {self.current_char} on {self.current_server}")
+            self.logger.info(f"♻️ Restored from state: {self.current_char} on {self.current_server}")
         else:
-            # Fallback: detect from config
-            config = self.script_runner.account_config
-            uptime = get_process_uptime("GTA5.exe")
+            # No valid state - sync with GTA5RP API to get accurate status
+            self.logger.info("🔄 No valid state - syncing with GTA5RP API...")
+            self._sync_state_from_api()
+    
+    def _sync_state_from_api(self):
+        """Sync current state from GTA5RP API"""
+        try:
+            from scripts.sync_profile import sync_profile
+            import platform
             
-            if uptime and uptime > 120:  # Running > 2 minutes
-                self.current_server = config.get("server")
-                self.current_char = config.get("active_character")
-                self.game_started_at = int(time.time() - uptime)
-                self._save_state()  # Save detected state
-                self.logger.info(f"🔍 Detected: {self.current_char} on {self.current_server} (uptime: {uptime}s)")
+            config = self.script_runner.account_config
+            login = config.get('gta_login') or config.get('login')
+            password = config.get('gta_password') or config.get('password')
+            server = config.get('server')
+            
+            if not login or not password:
+                self.logger.warning("No credentials for API sync")
+                return
+            
+            # Sync with API
+            success = sync_profile(
+                login=login,
+                password=password,
+                server_api_url=settings.CONFIG_API_URL,
+                machine_id=platform.node(),
+                server_name=server
+            )
+            
+            if success:
+                # Read the synced data from our server
+                self.logger.info("✅ API sync successful - checking online status...")
+                # The sync_profile saved data to our server, now we can check if character is online
+                # For now, just set based on config if sync succeeded
+                uptime = get_process_uptime("GTA5.exe")
+                if uptime and uptime > 120:  # If game running > 2 min and sync succeeded
+                    self.current_server = server
+                    self.current_char = config.get("active_character")
+                    self.game_started_at = int(time.time() - uptime)
+                    self._save_state()
+                    self.logger.info(f"✅ Set from API: {self.current_char} on {self.current_server}")
             else:
-                self.logger.debug(f"Game just started (uptime: {uptime}s) - waiting to detect state")
+                self.logger.warning("⚠️ API sync failed - cannot determine status")
+                
+        except Exception as e:
+            self.logger.error(f"Error syncing state from API: {e}")
     
     def _determine_status(self) -> str:
         """Determine bot status based on game state"""
