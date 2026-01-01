@@ -241,6 +241,24 @@ class VirtBot:
             else:
                 self.logger.debug(f"Game just started (uptime: {uptime}s) - waiting to detect state")
     
+    def _determine_status(self) -> str:
+        """Determine bot status based on game state"""
+        from game.launcher import is_process_running
+        
+        # If we have char and server = gaming
+        if self.current_char and self.current_server:
+            return "gaming"
+        
+        # If GTA5 is running but no char = loading/connecting
+        if is_process_running("GTA5.exe"):
+            uptime = get_process_uptime("GTA5.exe")
+            if uptime and uptime < 120:
+                return "loading"  # Just started
+            return "loading"  # Still loading/connecting
+        
+        # Otherwise online
+        return "online"
+    
     async def _heartbeat_loop(self):
         """Отправка heartbeat каждые N секунд"""
         prev_server = None
@@ -248,6 +266,9 @@ class VirtBot:
         
         while self.running:
             try:
+                # Determine current status based on game state
+                self.status = self._determine_status()
+                
                 # Получаем ip_status если он установлен в main.py
                 ip_status = getattr(self, 'ip_status', None)
                 ip_status_str = ip_status.value if ip_status else None
