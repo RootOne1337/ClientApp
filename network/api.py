@@ -23,17 +23,22 @@ class APIClient:
     ) -> Dict[str, Any]:
         """Отправить heartbeat на сервер"""
         try:
+            payload = {
+                "name": self.pc_name,
+                "ip": self._get_external_ip(),
+                "status": status,
+                "current_server": current_server,
+                "current_char": current_char,
+                "version": settings.VERSION,
+                "ip_status": ip_status,
+            }
+            
+            # Debug: log what we're sending
+            self.logger.debug(f"Sending heartbeat: {payload}")
+            
             response = await self.client.post(
                 f"{self.base_url}/machines/heartbeat",
-                json={
-                    "name": self.pc_name,
-                    "ip": self._get_external_ip(),
-                    "status": status,
-                    "current_server": current_server,
-                    "current_char": current_char,
-                    "version": settings.VERSION,
-                    "ip_status": ip_status,
-                }
+                json=payload
             )
             response.raise_for_status()
             return response.json()
