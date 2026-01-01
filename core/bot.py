@@ -276,27 +276,11 @@ class VirtBot:
     
     def _determine_status(self) -> str:
         """Determine bot status based on game state"""
-        from game.launcher import is_process_running
-        
-        # If we have char and server = gaming
+        # Simple logic: if we have character data = gaming
         if self.current_char and self.current_server:
             return "gaming"
         
-        # If GTA5 is running
-        if is_process_running("GTA5.exe"):
-            uptime = get_process_uptime("GTA5.exe")
-            
-            # If running > 5 minutes without char = assume gaming (char just not set yet)
-            if uptime and uptime > 300:  # 5 minutes
-                return "gaming"  # Probably gaming, just didn't restore char
-            
-            # If running < 5 min = still loading
-            if uptime and uptime < 120:
-                return "loading"  # Just started
-            
-            return "loading"  # Still loading/connecting
-        
-        # Otherwise online
+        # Otherwise online (bot is running)
         return "online"
     
     async def _heartbeat_loop(self):
