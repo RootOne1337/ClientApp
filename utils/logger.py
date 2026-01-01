@@ -8,22 +8,7 @@ from config import LOGS_DIR
 
 # Get machine name for logs
 def get_machine_name() -> str:
-    """Get machine display name for logging"""
-    # Try to get display_name from account.json if available
-    try:
-        from config import DATA_DIR
-        account_file = DATA_DIR / "account.json"
-        if account_file.exists():
-            import json
-            with open(account_file, 'r', encoding='utf-8') as f:
-                account = json.load(f)
-                display_name = account.get('display_name')
-                if display_name:
-                    return display_name
-    except:
-        pass
-    
-    # Fallback to computer name
+    """Get machine name for logging (uses COMPUTERNAME from Windows)"""
     return os.environ.get("COMPUTERNAME", os.environ.get("HOSTNAME", "Unknown"))
 
 MACHINE_NAME = get_machine_name()
