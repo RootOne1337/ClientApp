@@ -469,14 +469,18 @@ class VirtBot:
             
             self.logger.info("📊 Syncing GTA5RP profile...")
             
-            # Get account credentials from config
+            # Get account credentials AND server from config
             config = self.script_runner.account_config
             login = config.get('gta_login') or config.get('login')
             password = config.get('gta_password') or config.get('password')
+            server = config.get('server')  # NEW: Get server from config
             
             if not login or not password:
                 self.logger.error("No GTA5RP credentials in account config")
                 return "No credentials"
+            
+            if not server:
+                self.logger.warning("No server in config - will skip character fetch")
             
             # Get machine ID from last heartbeat or computer name
             import platform
@@ -486,12 +490,13 @@ class VirtBot:
                 login=login,
                 password=password,
                 server_api_url=settings.CONFIG_API_URL,
-                machine_id=machine_id
+                machine_id=machine_id,
+                server_name=server  # NEW: Pass server for optimization
             )
             
             if success:
                 self.logger.info("✅ Profile synced successfully")
-                return "Profile synced"
+                return f"Profile synced (server: {server or 'none'})"
             else:
                 self.logger.warning("⚠️ Profile sync failed")
                 return "Sync failed"

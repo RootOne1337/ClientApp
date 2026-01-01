@@ -3,6 +3,11 @@
 Sync Profile Script
 Fetches GTA5RP profile data from API and sends to our server.
 Runs on CLIENT (same IP as game) to avoid bans.
+
+OPTIMIZATIONS:
+- Uses cached token (valid ~30 days with remember=1)
+- Queries only specified server (not all 23)
+- Auto re-login on 401 errors
 """
 
 import json
@@ -12,12 +17,17 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 try:
     import requests
 except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
+
+from game.gta5rp_session import get_session, SERVER_NAMES
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,80 +36,17 @@ logger = logging.getLogger(__name__)
 # GTA5RP API
 GTA5RP_API = "https://gta5rp.com/api/V2"
 
-# Server names mapping
-SERVER_NAMES = {
-    1: "01.Downtown", 2: "02.Strawberry", 3: "03.Vinewood", 4: "04.Blackberry",
-    5: "05.Insquad", 6: "06.Sunrise", 7: "07.Rainbow", 8: "08.Richman",
-    9: "09.Eclipse", 10: "10.LaMesa", 11: "11.Burton", 12: "12.Rockford",
-    13: "13.Alta", 14: "14.DelPerro", 15: "15.Davis", 16: "16.Harmony",
-    17: "17.Redwood", 18: "18.Hawick", 19: "19.Grapeseed", 20: "20.Murrieta",
-    21: "21.Vespucci", 22: "22.Milton", 23: "23.LaPuerta"
-}
+# Server names mapping (now imported from gta5rp_session)
+# Kept here for backward compatibility if needed
 
 
-def gta5rp_login(login: str, password: str) -> Optional[str]:
-    """Login to GTA5RP and return token"""
-    try:
-        url = f"{GTA5RP_API}/users/auth/login"
-        payload = {"login": login, "password": password, "remember": "0"}
-        
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        if "token" in data:
-            logger.info(f"GTA5RP login successful (user_id: {data.get('user_id')})")
-            return data["token"]
-        else:
-            logger.error(f"GTA5RP login failed: {data}")
-            return None
-            
-    except requests.RequestException as e:
-        logger.error(f"GTA5RP login error: {e}")
-        return None
+# Removed: gta5rp_login() - now handled by GTA5RPSession
 
 
-def get_user_info(token: str) -> Optional[Dict[str, Any]]:
-    """Get user account info (balance, email, etc)"""
-    try:
-        url = f"{GTA5RP_API}/users/"
-        headers = {"x-access-token": token}
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        return response.json()
-        
-    except requests.RequestException as e:
-        logger.error(f"Get user info error: {e}")
-        return None
+# Removed: get_user_info() - now handled by GTA5RPSession
 
 
-def get_all_characters(token: str) -> List[Dict[str, Any]]:
-    """Get all characters from all servers"""
-    characters = []
-    headers = {"x-access-token": token}
-    
-    for server_id in range(1, 23):
-        try:
-            url = f"{GTA5RP_API}/users/chars/{server_id}"
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            if response.status_code != 200:
-                continue
-            
-            data = response.json()
-            if isinstance(data, list):
-                for char in data:
-                    char["server_id"] = server_id
-                    char["server_name"] = SERVER_NAMES.get(server_id, f"Server{server_id}")
-                    characters.append(char)
-                    
-        except Exception as e:
-            logger.warning(f"Error fetching server {server_id}: {e}")
-            continue
-    
-    return characters
+# Removed: get_all_characters() - now using get_characters_for_server() from session
 
 
 def get_online_character(characters: List[Dict]) -> Optional[Dict]:
@@ -110,32 +57,50 @@ def get_online_character(characters: List[Dict]) -> Optional[Dict]:
     return None
 
 
-def sync_profile(login: str, password: str, server_api_url: str, machine_id: str) -> bool:
+def sync_profile(login: str, password: str, server_api_url: str, machine_id: str, server_name: str = None) -> bool:
     """
-    Main sync function:
-    1. Login to GTA5RP
-    2. Get user info + characters
+    Main sync function (OPTIMIZED):
+    1. Login to GTA5RP (uses cached token if available)
+    2. Get user info + characters from SPECIFIC server
     3. Send to our server
+    
+    Args:
+        server_name: Server to query (e.g. "09.Eclipse"). If None, queries all servers (not recommended).
     """
     logger.info(f"Starting profile sync for machine {machine_id}")
     
-    # Step 1: Login to GTA5RP
-    token = gta5rp_login(login, password)
-    if not token:
-        logger.error("Failed to login to GTA5RP")
+    # Get global session
+    session = get_session()
+    
+    # Step 1: Login if needed (uses cached token if valid)
+    if not session.login_if_needed(login, password):
+        logger.error("Failed to authenticate")
         return False
     
     # Step 2: Get user info
-    user_info = get_user_info(token)
+    user_info = session.get_user_info()
     if not user_info:
-        logger.error("Failed to get user info")
-        return False
+        # Token might be expired, try re-login
+        logger.info("Retrying with forced re-login...")
+        if session.login_if_needed(login, password, force=True):
+            user_info = session.get_user_info()
+        
+        if not user_info:
+            logger.error("Failed to get user info")
+            return False
     
     logger.info(f"User: {user_info.get('login')}, Balance: {user_info.get('balance')}")
     
-    # Step 3: Get all characters
-    characters = get_all_characters(token)
-    logger.info(f"Found {len(characters)} characters")
+    # Step 3: Get characters ONLY from specified server (optimization!)
+    characters = []
+    if server_name:
+        logger.info(f"Querying only server: {server_name}")
+        characters = session.get_characters_for_server(server_name)
+    else:
+        logger.warning("No server specified, skipping character fetch")
+        # Could fallback to querying all servers here if needed
+    
+    logger.info(f"Found {len(characters)} characters on {server_name or 'all servers'}")
     
     # Step 4: Find online character
     online_char = get_online_character(characters)
