@@ -27,8 +27,8 @@ class APIClient:
                 "name": self.pc_name,
                 "ip": self._get_external_ip(),
                 "status": status,
-                "current_server": current_server,
-                "current_char": current_char,
+                "current_server": str(current_server) if current_server else None,
+                "current_char": str(current_char) if current_char else None,
                 "version": settings.VERSION,
                 "ip_status": ip_status,
             }
