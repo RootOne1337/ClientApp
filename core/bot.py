@@ -1,11 +1,34 @@
 import asyncio
+import json
+import time
+import platform
 from pathlib import Path
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Optional
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 from config import settings
 from network import APIClient
 from core.updater import Updater
 from utils import get_logger
 from automation.script_runner import ScriptRunner
+
+
+def get_process_uptime(process_name: str) -> Optional[int]:
+    """Get process uptime in seconds"""
+    if not psutil:
+        return None
+    
+    try:
+        for proc in psutil.process_iter(['name', 'create_time']):
+            if proc.info['name'] and proc.info['name'].lower() == process_name.lower():
+                return int(time.time() - proc.info['create_time'])
+    except Exception:
+        pass
+    return None
 
 
 class VirtBot:
@@ -21,6 +44,11 @@ class VirtBot:
         self.status = "online"
         self.current_server = None
         self.current_char = None
+        self.game_started_at = None
+        self.last_api_validation = 0
+        
+        # State persistence
+        self.state_file = settings.STATE_FILE
         
         # Обработчики команд
         self.command_handlers: Dict[str, Callable] = {
@@ -58,6 +86,9 @@ class VirtBot:
         """Главный цикл"""
         self.logger.info(f"🚀 VirtBot v{settings.VERSION} starting...")
         
+        # NEW: Restore state if game is already running
+        self._restore_state_on_startup()
+        
         # Проверка обновлений при старте
         if self.updater.check_update():
             self.updater.update_and_restart()
@@ -75,7 +106,7 @@ class VirtBot:
         tasks = [
             asyncio.create_task(self._heartbeat_loop()),
             asyncio.create_task(self._update_check_loop()),
-            # asyncio.create_task(self._game_loop()),  # TODO: добавить позже
+            asyncio.create_task(self._profile_sync_loop()),  # NEW: Periodic sync for validation
         ]
         
         try:
@@ -125,8 +156,96 @@ class VirtBot:
         self.logger.info("=" * 50)
         self.logger.info("")
     
+    # ============================================================================
+    # STATE MANAGEMENT
+    # ============================================================================
+    
+    def _load_state(self) -> dict:
+        """Load saved state from disk"""
+        try:
+            if self.state_file.exists():
+                with open(self.state_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            self.logger.warning(f"Failed to load state: {e}")
+        return {}
+    
+    def _save_state(self):
+        """Save current state to disk"""
+        try:
+            state = {
+                "current_server": self.current_server,
+                "current_char": self.current_char,
+                "game_started_at": self.game_started_at,
+                "last_updated": int(time.time())
+            }
+            
+            # Ensure data directory exists
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+            
+            self.logger.debug(f"State saved: {self.current_char} on {self.current_server}")
+        except Exception as e:
+            self.logger.warning(f"Failed to save state: {e}")
+    
+    def _is_state_valid(self, state: dict) -> bool:
+        """Check if saved state is still valid"""
+        if not state:
+            return False
+        
+        # Check if state is recent (< 12 hours old)
+        last_updated = state.get("last_updated", 0)
+        age = int(time.time()) - last_updated
+        if age > 43200:  # 12 hours
+            self.logger.debug(f"State too old: {age}s")
+            return False
+        
+        # Must have server and char
+        if not state.get("current_server") or not state.get("current_char"):
+            self.logger.debug("State missing server/char")
+            return False
+        
+        return True
+    
+    def _restore_state_on_startup(self):
+        """Restore game state if GTA5 is already running"""
+        from game.processes import is_process_running
+        
+        if not is_process_running("GTA5.exe"):
+            self.logger.debug("GTA5 not running - no state to restore")
+            return
+        
+        self.logger.info("🎮 GTA5.exe detected - attempting state recovery...")
+        
+        # Try to load saved state
+        state = self._load_state()
+        
+        if self._is_state_valid(state):
+            self.current_server = state.get("current_server")
+            self.current_char = state.get("current_char")
+            self.game_started_at = state.get("game_started_at")
+            self.logger.info(f"♻️ Restored: {self.current_char} on {self.current_server}")
+        else:
+            # Fallback: detect from config
+            config = self.script_runner.account_config
+            uptime = get_process_uptime("GTA5.exe")
+            
+            if uptime and uptime > 120:  # Running > 2 minutes
+                self.current_server = config.get("server")
+                self.current_char = config.get("active_character")
+                self.game_started_at = int(time.time() - uptime)
+                self._save_state()  # Save detected state
+                self.logger.info(f"🔍 Detected: {self.current_char} on {self.current_server} (uptime: {uptime}s)")
+            else:
+                self.logger.debug(f"Game just started (uptime: {uptime}s) - waiting to detect state")
+    
     async def _heartbeat_loop(self):
         """Отправка heartbeat каждые N секунд"""
+        prev_server = None
+        prev_char = None
+        
         while self.running:
             try:
                 # Получаем ip_status если он установлен в main.py
@@ -139,6 +258,12 @@ class VirtBot:
                     current_char=self.current_char,
                     ip_status=ip_status_str
                 )
+                
+                # NEW: Save state if changed
+                if self.current_server != prev_server or self.current_char != prev_char:
+                    self._save_state()
+                    prev_server = self.current_server
+                    prev_char = self.current_char
                 
                 # Обработка команд из ответа
                 for cmd in response.get("commands", []):
@@ -158,6 +283,62 @@ class VirtBot:
                 self.logger.info("Update found, restarting...")
                 await self.api.send_log("info", "Updating and restarting")
                 self.updater.update_and_restart()
+    
+    async def _profile_sync_loop(self):
+        """Periodic profile sync for API-based status validation"""
+        # Wait 5 minutes before first sync (let game start if needed)
+        await asyncio.sleep(300)
+        
+        while self.running:
+            try:
+                # Only sync if game is running
+                from game.processes import is_process_running
+                
+                if is_process_running("GTA5.exe"):
+                    await self._sync_and_validate_status()
+                else:
+                    self.logger.debug("Skipping sync - game not running")
+            except Exception as e:
+                self.logger.error(f"Profile sync error: {e}")
+            
+            # Wait 30 minutes (1800 seconds)
+            await asyncio.sleep(1800)
+    
+    async def _sync_and_validate_status(self):
+        """Sync profile and validate game status via API"""
+        from scripts.sync_profile import sync_profile
+        
+        config = self.script_runner.account_config
+        login = config.get('gta_login') or config.get('login')
+        password = config.get('gta_password') or config.get('password')
+        server = config.get('server')
+        
+        if not login or not password:
+            self.logger.warning("No credentials for sync_profile")
+            return
+        
+        self.logger.info("🔄 Running periodic profile sync for validation...")
+        
+        # Run sync_profile (uses cached token!)
+        machine_id = platform.node()
+        
+        success = sync_profile(
+            login=login,
+            password=password,
+            server_api_url=settings.CONFIG_API_URL,
+            machine_id=machine_id,
+            server_name=server
+        )
+        
+        if success:
+            # Mark that we validated via API
+            self.last_api_validation = int(time.time())
+            
+            # TODO: Get profile data from server and validate
+            # For now, just log success
+            self.logger.info(f"✅ Profile synced - last validation: now")
+        else:
+            self.logger.warning("⚠️ Profile sync failed - status may be inaccurate")
     
     async def _execute_command(self, cmd: Dict[str, Any]):
         """Выполнение команды от сервера"""
@@ -350,7 +531,17 @@ class VirtBot:
             from game.launcher import launch_and_connect
             
             if launch_and_connect():
+                # NEW: Update state when game launches
+                config = self.script_runner.account_config
+                self.current_server = config.get("server")
+                self.current_char = config.get("active_character")
+                self.game_started_at = int(time.time())
                 self.status = "gaming"
+                
+                # Save state to disk
+                self._save_state()
+                
+                self.logger.info(f"✅ Game launched: {self.current_char} → {self.current_server}")
                 return "Game launched and connecting to server!"
             return "Failed to launch game"
             
