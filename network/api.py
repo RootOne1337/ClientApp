@@ -34,7 +34,7 @@ class APIClient:
             }
             
             # Debug: log what we're sending
-            self.logger.debug(f"Sending heartbeat: {payload}")
+            self.logger.info(f"📤 Heartbeat payload: name={payload['name']}, status={payload['status']}, char={payload['current_char']}")
             
             response = await self.client.post(
                 f"{self.base_url}/machines/heartbeat",
