@@ -257,17 +257,18 @@ class VirtBot:
             )
             
             if success:
-                # Read the synced data from our server
-                self.logger.info("✅ API sync successful - checking online status...")
-                # The sync_profile saved data to our server, now we can check if character is online
-                # For now, just set based on config if sync succeeded
+                # API sync successful - set state
+                self.logger.info("✅ API sync successful - setting character state...")
+                
+                self.current_server = server
+                self.current_char = config.get("active_character") or config.get("nickname") or "Unknown"
+                
+                # Get uptime for game_started_at
                 uptime = get_process_uptime("GTA5.exe")
-                if uptime and uptime > 120:  # If game running > 2 min and sync succeeded
-                    self.current_server = server
-                    self.current_char = config.get("active_character")
-                    self.game_started_at = int(time.time() - uptime)
-                    self._save_state()
-                    self.logger.info(f"✅ Set from API: {self.current_char} on {self.current_server}")
+                self.game_started_at = int(time.time() - uptime) if uptime else int(time.time())
+                
+                self._save_state()
+                self.logger.info(f"✅ State set from API: {self.current_char} on {self.current_server}")
             else:
                 self.logger.warning("⚠️ API sync failed - cannot determine status")
                 
