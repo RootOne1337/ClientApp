@@ -41,6 +41,11 @@ class Settings:
     SCREENSHOTS_DIR: Path = SCREENSHOTS_DIR
     SCRIPTS_DIR: Path = SCRIPTS_DIR
     
+    # File paths
+    ACCOUNT_FILE: Path = ACCOUNT_FILE
+    CREDENTIALS_FILE: Path = CREDENTIALS_FILE
+    STATE_FILE: Path = STATE_FILE
+    
     # API сервера VirtApp
     API_URL: str = os.getenv("API_URL", "http://gta5rp.leetpc.com/api")
     
