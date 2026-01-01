@@ -46,6 +46,7 @@ class VirtBot:
         self.current_char = None
         self.game_started_at = None
         self.last_api_validation = 0
+        self.automation_paused = False  # Pause flag
         
         # State persistence
         self.state_file = settings.STATE_FILE
@@ -60,7 +61,8 @@ class VirtBot:
             "stop_roulette": self._cmd_stop_roulette,
             "sync_accounts": self._cmd_sync_accounts,
             "join_server": self._cmd_join_server,
-            "stop_bot": self._cmd_stop_bot,
+            "pause_automation": self._cmd_pause_automation,
+            "resume_automation": self._cmd_resume_automation,
             "run_script": self._cmd_run_script,
             "start_scripts": self._cmd_start_scripts,
             "stop_scripts": self._cmd_stop_scripts,
@@ -277,6 +279,10 @@ class VirtBot:
     
     def _determine_status(self) -> str:
         """Determine bot status based on game state"""
+        # Check if automation is paused first
+        if self.automation_paused:
+            return "paused"
+        
         # Simple logic: if we have character data = gaming
         if self.current_char and self.current_server:
             return "gaming"
@@ -595,11 +601,37 @@ class VirtBot:
             self.logger.error(f"Launcher error: {e}")
             return f"Launch error: {e}"
     
-    async def _cmd_stop_bot(self, params: Dict) -> str:
-        """Команда: остановить бота"""
-        self.logger.info("🛑 Stop command received")
-        self.stop()
-        return "Bot stopping..."
+    async def _cmd_pause_automation(self, params: Dict) -> str:
+        """Команда: приостановить автоматизацию (heartbeat продолжает работать)"""
+        self.logger.info("⏸️  Pausing automation...")
+        
+        self.automation_paused = True
+        
+        # Останавливаем script runner и trigger scanner
+        if hasattr(self, 'script_runner'):
+            self.script_runner.stop()
+        
+        self.trigger_scanner_running = False
+        
+        # self.running остается True - heartbeat продолжает!
+        self.logger.info("✅ Automation paused. Heartbeat still active.")
+        return "Automation paused. Heartbeat still active."
+    
+    async def _cmd_resume_automation(self, params: Dict) -> str:
+        """Команда: возобновить автоматизацию"""
+        self.logger.info("▶️  Resuming automation...")
+        
+        self.automation_paused = False
+        
+        # Перезапускаем script runner и trigger scanner
+        if hasattr(self, 'script_runner'):
+            self.script_runner.start()
+        
+        # Перезапускаем trigger scanner
+        await self._start_trigger_scanner()
+        
+        self.logger.info("✅ Automation resumed!")
+        return "Automation resumed!"
     
     async def _cmd_run_script(self, params: Dict) -> str:
         """Команда: запустить скрипт по имени"""
