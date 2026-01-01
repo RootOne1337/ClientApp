@@ -31,7 +31,6 @@ SCREENSHOTS_DIR.mkdir(exist_ok=True)
 ACCOUNT_FILE = DATA_DIR / "account.json"       # Данные аккаунта от API
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"  # Google credentials
 STATE_FILE = DATA_DIR / "state.json"           # Game state (server, char, started_at)
-STATE_FILE = DATA_DIR / "state.json"           # Состояние бота
 
 
 class Settings:
