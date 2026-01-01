@@ -623,12 +623,12 @@ class VirtBot:
         
         self.automation_paused = False
         
-        # Перезапускаем script runner и trigger scanner
+        # Перезапускаем script runner
         if hasattr(self, 'script_runner'):
             self.script_runner.start()
         
-        # Перезапускаем trigger scanner
-        await self._start_trigger_scanner()
+        # Включаем trigger scanner (он запустится автоматически в run loop)
+        self.trigger_scanner_running = True
         
         self.logger.info("✅ Automation resumed!")
         return "Automation resumed!"
